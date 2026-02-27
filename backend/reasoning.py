@@ -77,9 +77,10 @@ Respond with ONLY valid JSON in this exact structure:
 Rules:
 - Generate 1-3 insights that are strategically relevant to the CLIENT COMPANY
 - Insights should be specific and analytical, not generic. Connect data points.
-- ONLY create relationships between entities that were EXTRACTED THIS CYCLE or ALREADY EXIST in the graph. Never invent entity names.
+- Create relationships between entities extracted THIS CYCLE or ALREADY in the graph. Never invent entity names.
 - Relationship entity names must EXACTLY match extracted entity names (case-sensitive)
-- Valid relationship types: COMPETES_WITH, WORKS_AT, FOUNDED, PREVIOUSLY_AT, RAISED, LED_BY, BUILDS, PARTNERS_WITH
+- Valid relationship types: COMPETES_WITH, WORKS_AT, FOUNDED, PREVIOUSLY_AT, RAISED, LED_BY, BUILDS, PARTNERS_WITH, ACQUIRED
+- Note: a dedicated relationship extraction pass already handles obvious links (person→company, company→product). Focus your relationships on COMPETITIVE and STRATEGIC connections that require analytical reasoning.
 - Generate 2-3 new search queries focused on the client company's competitive landscape
 - New queries must be DIFFERENT from previous queries
 - Focus on: direct competitors, their funding/hiring, product launches, market moves, partnership threats

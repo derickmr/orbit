@@ -80,6 +80,110 @@ def extract_entities(text: str) -> list[dict]:
     ]
 
 
+_RELATIONSHIP_PROMPT = """You are extracting relationships between entities from competitive intelligence text.
+
+You are given:
+1. The source text (evidence)
+2. Entities extracted from THIS cycle
+3. ALL entities that already exist in the knowledge graph from previous cycles
+
+Your job: find relationships between ANY of these entities — including cross-cycle connections (e.g. a person from a previous cycle linked to a company found this cycle).
+
+Return ONLY valid JSON:
+{{
+  "relationships": [
+    {{
+      "from_name": "Girish Mathrubootham",
+      "from_type": "person",
+      "to_name": "Freshworks",
+      "to_type": "company",
+      "relationship": "FOUNDED"
+    }}
+  ]
+}}
+
+Valid relationship types:
+- COMPETES_WITH — two companies in the same market
+- WORKS_AT — person currently works at company
+- FOUNDED — person founded company
+- PREVIOUSLY_AT — person used to work at company
+- RAISED — company raised a funding round (company → funding_amount)
+- LED_BY — funding round led by investor (funding_amount → company investor)
+- BUILDS — company builds/owns a product (company → product)
+- PARTNERS_WITH — two companies have a partnership
+- ACQUIRED — company acquired another company
+
+Rules:
+- ONLY create relationships you have evidence for in the text or that are common knowledge
+- Entity names must EXACTLY match names from the provided entity lists (case-sensitive)
+- Do NOT invent entities — only use names from the provided lists
+- Create ALL relationship types you can find, not just COMPETES_WITH
+- Especially look for: person→company, company→product, company→funding connections
+- If the text says "X, founder of Y" → create FOUNDED relationship
+- If the text says "X offers/launched Y product" → create BUILDS relationship
+- If the text says "X raised $Y" → create RAISED relationship
+- Generate as many valid relationships as the evidence supports
+"""
+
+
+def extract_relationships(text: str, new_entities: list[dict], existing_entities: list[dict]) -> list[dict]:
+    """Extract relationships between entities using the source text as evidence.
+
+    Considers both new entities from this cycle AND existing entities from the graph.
+    Returns list of {{from_name, from_type, to_name, to_type, relationship}}.
+    """
+    text = text[:6000]
+
+    new_list = "\n".join(f"- {e['name']} ({e['type']})" for e in new_entities) or "None"
+    existing_list = "\n".join(f"- {e['name']} ({e['type']})" for e in existing_entities) or "None"
+
+    user_msg = f"""SOURCE TEXT:
+{text}
+
+ENTITIES EXTRACTED THIS CYCLE:
+{new_list}
+
+EXISTING ENTITIES IN GRAPH (from previous cycles):
+{existing_list}
+
+Find all relationships between these entities based on the evidence in the text."""
+
+    valid_rels = {
+        "COMPETES_WITH", "WORKS_AT", "FOUNDED", "PREVIOUSLY_AT",
+        "RAISED", "LED_BY", "BUILDS", "PARTNERS_WITH", "ACQUIRED",
+    }
+    all_names = {e["name"] for e in new_entities} | {e["name"] for e in existing_entities}
+
+    try:
+        response = _openai.chat.completions.create(
+            model="gpt-4o-mini",
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": _RELATIONSHIP_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0,
+        )
+        raw = json.loads(response.choices[0].message.content)
+        relationships = raw.get("relationships", [])
+        # Validate: both entities must exist and relationship type must be valid
+        return [
+            {
+                "from_name": r["from_name"].strip(),
+                "from_type": r["from_type"].lower().strip(),
+                "to_name": r["to_name"].strip(),
+                "to_type": r["to_type"].lower().strip(),
+                "relationship": r["relationship"].upper().strip(),
+            }
+            for r in relationships
+            if r.get("from_name", "").strip() in all_names
+            and r.get("to_name", "").strip() in all_names
+            and r.get("relationship", "").upper().strip() in valid_rels
+        ]
+    except Exception:
+        return []
+
+
 def extract_signals(text: str) -> list[dict]:
     """Extract free-form strategic signals from text. Returns list of {text, category, entities}."""
     text = text[:8000]

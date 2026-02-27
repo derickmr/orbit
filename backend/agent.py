@@ -7,7 +7,7 @@ from datetime import datetime
 
 from backend.config import MAX_CYCLES, DEBUG
 from backend.discovery import tavily_search
-from backend.extraction import extract_entities, extract_signals
+from backend.extraction import extract_entities, extract_signals, extract_relationships
 from backend.reasoning import generate_reasoning, generate_deep_analysis
 from backend import graph
 
@@ -201,6 +201,18 @@ async def _run_cycle(
     await graph.store_signals(signals, query, cycle)
     for sig in signals:
         emit_log("signal", f"SIGNAL [{sig['category']}]: \"{sig['text'][:80]}\"", cycle)
+
+    # 3b. EXTRACT RELATIONSHIPS (cross-cycle aware)
+    existing_entities = await graph.get_all_entities()
+    emit_log("extract", f"Linking entities ({len(entities)} new + {len(existing_entities)} existing)...", cycle)
+    extracted_rels = extract_relationships(combined_text, entities, existing_entities)
+    _dump_debug(cycle, "extracted_relationships", extracted_rels)
+    for rel in extracted_rels:
+        await graph.store_relationships([rel])
+        emit_log("relationship",
+                 f"LINK: {rel['from_name']} —{rel['relationship']}→ {rel['to_name']}", cycle,
+                 {"relationship": rel})
+    emit_log("extract", f"Extracted {len(extracted_rels)} relationships from text", cycle)
 
     # 4. REASON
     emit_log("reason", "Reasoning about connections...", cycle)

@@ -100,14 +100,37 @@ def _label(type_str: str) -> str:
 def _relationship_query(from_label: str, to_label: str, rel_type: str) -> str | None:
     valid = {
         "COMPETES_WITH", "WORKS_AT", "FOUNDED", "PREVIOUSLY_AT",
-        "RAISED", "LED_BY", "BUILDS", "PARTNERS_WITH",
+        "RAISED", "LED_BY", "BUILDS", "PARTNERS_WITH", "ACQUIRED",
     }
     if rel_type not in valid:
         return None
+    # FundingEvent uses amount_text instead of name
+    from_key = "amount_text" if from_label == "FundingEvent" else "name"
+    to_key = "amount_text" if to_label == "FundingEvent" else "name"
     return (
-        f"MATCH (a:{from_label} {{name: $from_name}}), (b:{to_label} {{name: $to_name}}) "
+        f"MATCH (a:{from_label} {{{from_key}: $from_name}}), (b:{to_label} {{{to_key}: $to_name}}) "
         f"MERGE (a)-[:{rel_type}]->(b)"
     )
+
+
+async def get_all_entities() -> list[dict]:
+    """Return all entity nodes (name + type) for relationship extraction."""
+    async with driver.session() as session:
+        result = await session.run(
+            """MATCH (n)
+            WHERE n:Company OR n:Person OR n:FundingEvent OR n:Product
+            RETURN coalesce(n.name, n.amount_text, '') AS name,
+                   labels(n)[0] AS type"""
+        )
+        label_to_type = {
+            "Company": "company", "Person": "person",
+            "FundingEvent": "funding_amount", "Product": "product",
+        }
+        return [
+            {"name": r["name"], "type": label_to_type.get(r["type"], r["type"].lower())}
+            async for r in result
+            if r["name"]
+        ]
 
 
 async def store_insight(insight: dict, cycle: int):
