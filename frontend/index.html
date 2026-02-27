@@ -365,14 +365,18 @@ const NODE_COLORS = {
   Company: '#3B82F6', Person: '#10B981',
   FundingEvent: '#F59E0B', Product: '#8B5CF6', Insight: '#EF4444',
 };
+const CLIENT_COLOR = '#00D4AA';
 
 // ── Graph Setup ──
 const graphNodes = new vis.DataSet();
 const graphEdges = new vis.DataSet();
 const container = document.getElementById('graph-container');
 const network = new vis.Network(container, { nodes: graphNodes, edges: graphEdges }, {
-  physics: { stabilization: false, barnesHut: { gravitationalConstant: -3000, springLength: 150 } },
-  nodes: { font: { color: '#E2E8F0', size: 12 }, borderWidth: 0, shadow: true },
+  physics: {
+    stabilization: { iterations: 150 },
+    barnesHut: { gravitationalConstant: -4000, springLength: 180, springConstant: 0.04, damping: 0.3 },
+  },
+  nodes: { font: { color: '#E2E8F0', size: 12 }, borderWidth: 2, shadow: true },
   edges: {
     color: { color: '#2D3B55', highlight: '#00D4AA' },
     font: { color: '#64748B', size: 9, strokeWidth: 0 },
@@ -485,31 +489,65 @@ async function pollGraph() {
   try {
     const res = await fetch(`${API}/api/graph`);
     const data = await res.json();
+    const edges = data.edges || [];
+    const nodes = data.nodes || [];
 
-    const newNodeIds = new Set();
-    (data.nodes || []).forEach(n => {
-      newNodeIds.add(n.id);
-      if (!knownNodeIds.has(n.id)) {
-        const color = NODE_COLORS[n.type] || '#64748B';
-        graphNodes.add({
-          id: n.id, label: n.name || n.type,
-          color: { background: color, border: color, highlight: { background: color, border: '#00D4AA' } },
-          shape: n.type === 'Insight' ? 'diamond' : 'dot',
-          size: n.type === 'Company' ? 20 : 14,
-          title: `${n.type}: ${n.name}`,
-        });
-        knownNodeIds.add(n.id);
+    // Build set of node IDs that participate in at least one edge
+    const connectedIds = new Set();
+    edges.forEach(e => { connectedIds.add(e.source); connectedIds.add(e.target); });
+
+    // Get client company name for special styling
+    const clientName = document.getElementById('company-name').value.trim().toLowerCase();
+
+    // Get threat scores for sizing
+    let threatMap = {};
+    try {
+      const sr = await fetch(`${API}/api/scoreboard`);
+      const scores = await sr.json();
+      scores.forEach(s => { threatMap[s.company] = s.score; });
+    } catch (e) { /* ignore */ }
+
+    // Add only connected nodes (hide orphans)
+    nodes.forEach(n => {
+      if (!connectedIds.has(n.id)) return;  // skip orphans
+      if (knownNodeIds.has(n.id)) return;    // already added
+
+      const isClient = clientName && (n.name || '').toLowerCase() === clientName;
+      const threat = threatMap[n.name] || 0;
+      const baseColor = NODE_COLORS[n.type] || '#64748B';
+      const color = isClient ? CLIENT_COLOR : baseColor;
+
+      // Size: client=35, companies sized by threat (16-28), others=12
+      let size = 12;
+      if (n.type === 'Company') {
+        size = isClient ? 35 : (threat > 0 ? 16 + Math.round(threat * 0.12) : 16);
       }
+
+      graphNodes.add({
+        id: n.id,
+        label: n.name || n.type,
+        color: {
+          background: isClient ? '#0B1120' : color,
+          border: color,
+          highlight: { background: isClient ? '#0B1120' : color, border: '#00D4AA' },
+        },
+        borderWidth: isClient ? 3 : 2,
+        shape: n.type === 'Insight' ? 'diamond' : 'dot',
+        size: size,
+        font: { color: '#E2E8F0', size: isClient ? 16 : 12, bold: isClient },
+        title: `${n.type}: ${n.name}${threat ? ' (threat: ' + threat + ')' : ''}`,
+        fixed: isClient ? { x: true, y: true } : false,
+        x: isClient ? 0 : undefined,
+        y: isClient ? 0 : undefined,
+      });
+      knownNodeIds.add(n.id);
     });
 
-    const newEdgeIds = new Set();
-    (data.edges || []).forEach(e => {
+    edges.forEach(e => {
       const eid = `${e.source}-${e.relationship}-${e.target}`;
-      newEdgeIds.add(eid);
-      if (!knownEdgeIds.has(eid)) {
-        graphEdges.add({ from: e.source, to: e.target, label: e.relationship, id: eid });
-        knownEdgeIds.add(eid);
-      }
+      if (knownEdgeIds.has(eid)) return;
+      graphEdges.add({ from: e.source, to: e.target, label: e.relationship, id: eid });
+      knownEdgeIds.add(eid);
     });
   } catch (err) { /* ignore */ }
 }
