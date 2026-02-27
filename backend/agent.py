@@ -38,12 +38,20 @@ def _dump_debug(cycle: int, label: str, data):
         json.dump(data, f, indent=2, default=str)
 
 
-async def run_agent(seed_query: str, max_cycles: int = MAX_CYCLES):
+async def run_agent(company_name: str, company_description: str, max_cycles: int = MAX_CYCLES):
     """Core agent loop: discover → extract → store → reason → loop."""
     global agent_status
-    agent_status = {"status": "running", "cycle": 0, "seed_query": seed_query}
+    company_context = f"{company_name}: {company_description}"
+    seed_query = f"{company_name} competitors {company_description}"
+    agent_status = {
+        "status": "running", "cycle": 0, "seed_query": seed_query,
+        "company_name": company_name, "company_description": company_description,
+    }
 
-    pending_queries = [{"query": seed_query, "rationale": "Initial seed"}]
+    pending_queries = [
+        {"query": seed_query, "rationale": "Initial competitive landscape scan"},
+        {"query": f"{company_name} market competitors alternatives", "rationale": "Direct competitor discovery"},
+    ]
     completed_queries: list[str] = []
     cycle = 0
 
@@ -60,7 +68,7 @@ async def run_agent(seed_query: str, max_cycles: int = MAX_CYCLES):
 
             try:
                 await _run_cycle(
-                    seed_query, query, query_item, cycle,
+                    company_context, query, query_item, cycle,
                     pending_queries, completed_queries,
                 )
             except Exception as e:
@@ -74,27 +82,25 @@ async def run_agent(seed_query: str, max_cycles: int = MAX_CYCLES):
         emit_log("error", f"Agent crashed: {e}", cycle)
 
 
-async def run_single_cycle(seed_query: str):
+async def run_single_cycle(company_name: str, company_description: str):
     """Trigger one additional cycle using the next pending query or a follow-up."""
     global agent_status
+    company_context = f"{company_name}: {company_description}"
     cycle = agent_status.get("cycle", 0) + 1
     agent_status["status"] = "running"
     agent_status["cycle"] = cycle
 
-    # Find a query to run — use graph context to generate one if needed
-    stats = await graph.get_graph_stats()
     emit_log("cycle_start", f"Triggered cycle {cycle}", cycle)
 
     try:
-        # Get existing insights to form a follow-up query
         insights = await graph.get_insights()
         if insights:
-            query = f"latest news and competitors related to {seed_query}"
+            query = f"latest news and competitors of {company_name}"
         else:
-            query = seed_query
+            query = f"{company_name} competitors {company_description}"
 
         await _run_cycle(
-            seed_query, query, {"query": query, "rationale": "Manual trigger"},
+            company_context, query, {"query": query, "rationale": "Manual trigger"},
             cycle, [], [query],
         )
     except Exception as e:
@@ -104,7 +110,7 @@ async def run_single_cycle(seed_query: str):
 
 
 async def _run_cycle(
-    seed_query: str,
+    company_context: str,
     query: str,
     query_item: dict,
     cycle: int,
@@ -142,7 +148,7 @@ async def _run_cycle(
     graph_context = await graph.get_graph_context(entities)
     stats = await graph.get_graph_stats()
     reasoning = generate_reasoning(
-        seed_query=seed_query,
+        seed_query=company_context,
         current_query=query,
         search_results=search_results,
         entities=entities,

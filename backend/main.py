@@ -37,7 +37,8 @@ _openai = OpenAI(api_key=OPENAI_API_KEY)
 # ── Request models ──
 
 class SeedRequest(BaseModel):
-    query: str
+    company_name: str
+    company_description: str
     max_cycles: int = 5
 
 
@@ -53,13 +54,16 @@ async def seed(req: SeedRequest, bg: BackgroundTasks):
         return {"error": "Agent is already running"}
     agent_logs.clear()
     agent_status["status"] = "running"
-    agent_status["seed_query"] = req.query
-    bg.add_task(_run_agent_wrapper, req.query, req.max_cycles)
-    return {"status": "started", "query": req.query, "max_cycles": req.max_cycles}
+    agent_status["company_name"] = req.company_name
+    agent_status["company_description"] = req.company_description
+    seed_query = f"{req.company_name} competitors {req.company_description}"
+    agent_status["seed_query"] = seed_query
+    bg.add_task(_run_agent_wrapper, req.company_name, req.company_description, req.max_cycles)
+    return {"status": "started", "company": req.company_name, "max_cycles": req.max_cycles}
 
 
-async def _run_agent_wrapper(query: str, max_cycles: int):
-    await run_agent(query, max_cycles)
+async def _run_agent_wrapper(company_name: str, company_description: str, max_cycles: int):
+    await run_agent(company_name, company_description, max_cycles)
 
 
 @app.get("/api/status")
@@ -106,10 +110,11 @@ async def get_actions():
 async def trigger_cycle(bg: BackgroundTasks):
     if agent_status["status"] == "running":
         return {"error": "Agent is already running"}
-    seed_query = agent_status.get("seed_query", "")
-    if not seed_query:
-        return {"error": "No seed query set. Run /api/seed first."}
-    bg.add_task(run_single_cycle, seed_query)
+    company_name = agent_status.get("company_name", "")
+    company_description = agent_status.get("company_description", "")
+    if not company_name:
+        return {"error": "No company set. Run /api/seed first."}
+    bg.add_task(run_single_cycle, company_name, company_description)
     return {"status": "triggered"}
 
 
@@ -168,6 +173,8 @@ async def clear():
     agent_status["status"] = "idle"
     agent_status["cycle"] = 0
     agent_status["seed_query"] = ""
+    agent_status["company_name"] = ""
+    agent_status["company_description"] = ""
     return {"status": "cleared"}
 
 

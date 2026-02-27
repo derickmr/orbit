@@ -294,7 +294,8 @@
     </div>
     <div class="ask-answer" id="ask-answer"></div>
     <div class="controls-row">
-      <input type="text" id="seed-input" placeholder="Seed query: e.g. AI agents for customer support">
+      <input type="text" id="company-name" placeholder="Your company name: e.g. Intercom" style="max-width:200px">
+      <input type="text" id="company-desc" placeholder="What you do: e.g. AI-powered customer support platform">
       <button class="btn btn-primary" id="start-btn" onclick="startAgent()">▶ Start</button>
       <button class="btn btn-secondary" id="cycle-btn" onclick="triggerCycle()">🔄 Cycle</button>
       <button class="btn btn-danger" onclick="clearGraph()">🗑 Clear</button>
@@ -547,8 +548,9 @@ async function pollInsights() {
 
 // ── Actions ──
 async function startAgent() {
-  const query = document.getElementById('seed-input').value.trim();
-  if (!query) return;
+  const name = document.getElementById('company-name').value.trim();
+  const desc = document.getElementById('company-desc').value.trim();
+  if (!name || !desc) return;
   lastLogCount = 0;
   document.getElementById('feed').innerHTML = '';
   knownNodeIds.clear(); knownEdgeIds.clear();
@@ -556,7 +558,7 @@ async function startAgent() {
   await fetch(`${API}/api/seed`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ company_name: name, company_description: desc }),
   });
 }
 
@@ -601,7 +603,7 @@ async function askQuestion() {
 
 // Enter key bindings
 document.getElementById('ask-input').addEventListener('keydown', e => { if (e.key === 'Enter') askQuestion(); });
-document.getElementById('seed-input').addEventListener('keydown', e => { if (e.key === 'Enter') startAgent(); });
+document.getElementById('company-desc').addEventListener('keydown', e => { if (e.key === 'Enter') startAgent(); });
 
 function escapeHtml(s) {
   if (!s) return '';
