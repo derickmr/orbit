@@ -25,7 +25,8 @@ Rules:
 - Deduplicate: if the same entity appears multiple times, include it once
 - funding_amount: ONLY actual investment/fundraising rounds (e.g. "$125M Series D", "$350 million funding"). Do NOT include product pricing, subscription costs, or per-unit prices (e.g. "$0.99 per conversation" is NOT a funding amount)
 - product: named software products, platforms, or tools (e.g. "Fin AI", "Zendesk Suite"). Do NOT include generic descriptions like "AI customer service agents"
-- company: real company names only, not investor types or generic terms
+- company: ONLY extract companies that are ACTIVE PLAYERS in the competitive landscape — competitors, partners, acquirers, investors/VCs, or the subject company itself. Do NOT extract companies mentioned only as customers, clients, or case studies (e.g. if the text says "used by Honda, UNICEF, and Cisco" — do NOT extract Honda, UNICEF, or Cisco unless they are competitors or partners)
+- person: ONLY extract people who are executives, founders, or key decision-makers at relevant companies. Do NOT extract people mentioned only as customers or testimonial authors
 - Keep entity names as they appear in the text (proper casing)
 """
 
@@ -62,7 +63,7 @@ def extract_entities(text: str) -> list[dict]:
     """Extract entities from text using OpenAI. Returns list of {name, type}."""
     text = text[:8000]
     response = _openai.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4.1-mini",
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": _EXTRACTION_PROMPT},
@@ -118,10 +119,12 @@ Rules:
 - Entity names must EXACTLY match names from the provided entity lists (case-sensitive)
 - Do NOT invent entities — only use names from the provided lists
 - Create ALL relationship types you can find, not just COMPETES_WITH
-- Especially look for: person→company, company→product, company→funding connections
+- Especially look for: person→company, company→product, company→funding, investor→funding connections
 - If the text says "X, founder of Y" → create FOUNDED relationship
 - If the text says "X offers/launched Y product" → create BUILDS relationship
 - If the text says "X raised $Y" → create RAISED relationship
+- If the text says "round led by X" or "investors include X" → create LED_BY from funding_amount to investor company
+- If the text says "X acquired Y" → create ACQUIRED relationship
 - Generate as many valid relationships as the evidence supports
 """
 
@@ -156,7 +159,7 @@ Find all relationships between these entities based on the evidence in the text.
 
     try:
         response = _openai.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": _RELATIONSHIP_PROMPT},
@@ -189,7 +192,7 @@ def extract_signals(text: str) -> list[dict]:
     text = text[:8000]
     try:
         response = _openai.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": _SIGNALS_PROMPT},
