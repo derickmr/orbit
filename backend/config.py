@@ -12,3 +12,4 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 MAX_CYCLES = 5
 TAVILY_MAX_RESULTS = 5
 OPENAI_MODEL = "gpt-4o"
+DEBUG = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
