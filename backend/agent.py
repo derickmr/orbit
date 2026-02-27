@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections import Counter
@@ -203,17 +204,19 @@ async def _run_cycle(
              {"count": len(search_results)})
     _dump_debug(cycle, "search_results", search_results)
 
-    # 2. EXTRACT
+    # 2. EXTRACT (entities + signals in parallel)
     combined_text = " ".join(r.get("content", "") for r in search_results)
-    entities = extract_entities(combined_text, company_context)
+    entities, signals = await asyncio.gather(
+        asyncio.to_thread(extract_entities, combined_text, company_context),
+        asyncio.to_thread(extract_signals, combined_text),
+    )
+
     type_counts = Counter(e["type"] for e in entities)
     type_summary = ", ".join(f"{v} {k}" for k, v in type_counts.items())
     emit_log("extract", f"Extracted {len(entities)} entities ({type_summary})", cycle,
              {"entities": entities[:10]})
     _dump_debug(cycle, "entities", entities)
 
-    # 2b. EXTRACT SIGNALS (free-form layer)
-    signals = extract_signals(combined_text)
     cat_counts = Counter(s["category"] for s in signals)
     cat_summary = ", ".join(f"{v} {k}" for k, v in cat_counts.items())
     emit_log("extract", f"Extracted {len(signals)} signals ({cat_summary})", cycle,
@@ -233,8 +236,8 @@ async def _run_cycle(
     emit_log("extract", f"Linking entities ({len(entities)} new + {len(existing_entities)} existing)...", cycle)
     extracted_rels = extract_relationships(combined_text, entities, existing_entities)
     _dump_debug(cycle, "extracted_relationships", extracted_rels)
+    await graph.store_relationships(extracted_rels)
     for rel in extracted_rels:
-        await graph.store_relationships([rel])
         emit_log("relationship",
                  f"LINK: {rel['from_name']} —{rel['relationship']}→ {rel['to_name']}", cycle,
                  {"relationship": rel})

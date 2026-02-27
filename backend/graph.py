@@ -19,46 +19,52 @@ async def close_driver():
 
 
 async def store_entities(entities: list[dict], source_query: str, cycle: int):
-    """MERGE each entity as a node. Expects list of {"name": ..., "type": ...}."""
-    async with driver.session() as session:
-        for entity in entities:
-            name = entity.get("name", "").strip()
-            etype = entity.get("type", "").lower()
-            if not name:
-                continue
+    """MERGE each entity as a node using batched UNWIND queries per type."""
+    from collections import defaultdict
+    by_type = defaultdict(list)
+    for entity in entities:
+        name = entity.get("name", "").strip()
+        etype = entity.get("type", "").lower()
+        if name:
+            by_type[etype].append(name)
 
-            if etype == "company":
-                await session.run(
-                    """MERGE (n:Company {name: $name})
-                    SET n.discovered_at = coalesce(n.discovered_at, datetime()),
-                        n.source_query = coalesce(n.source_query, $source),
-                        n.cycle = coalesce(n.cycle, $cycle)""",
-                    name=name, source=source_query, cycle=cycle,
-                )
-            elif etype == "person":
-                await session.run(
-                    """MERGE (n:Person {name: $name})
-                    SET n.discovered_at = coalesce(n.discovered_at, datetime()),
-                        n.source_query = coalesce(n.source_query, $source),
-                        n.cycle = coalesce(n.cycle, $cycle)""",
-                    name=name, source=source_query, cycle=cycle,
-                )
-            elif etype == "funding_amount":
-                await session.run(
-                    """MERGE (n:FundingEvent {amount_text: $name})
-                    SET n.discovered_at = coalesce(n.discovered_at, datetime()),
-                        n.source_query = coalesce(n.source_query, $source),
-                        n.cycle = coalesce(n.cycle, $cycle)""",
-                    name=name, source=source_query, cycle=cycle,
-                )
-            elif etype == "product":
-                await session.run(
-                    """MERGE (n:Product {name: $name})
-                    SET n.discovered_at = coalesce(n.discovered_at, datetime()),
-                        n.source_query = coalesce(n.source_query, $source),
-                        n.cycle = coalesce(n.cycle, $cycle)""",
-                    name=name, source=source_query, cycle=cycle,
-                )
+    async with driver.session() as session:
+        if by_type.get("company"):
+            await session.run(
+                """UNWIND $names AS name
+                MERGE (n:Company {name: name})
+                SET n.discovered_at = coalesce(n.discovered_at, datetime()),
+                    n.source_query = coalesce(n.source_query, $source),
+                    n.cycle = coalesce(n.cycle, $cycle)""",
+                names=by_type["company"], source=source_query, cycle=cycle,
+            )
+        if by_type.get("person"):
+            await session.run(
+                """UNWIND $names AS name
+                MERGE (n:Person {name: name})
+                SET n.discovered_at = coalesce(n.discovered_at, datetime()),
+                    n.source_query = coalesce(n.source_query, $source),
+                    n.cycle = coalesce(n.cycle, $cycle)""",
+                names=by_type["person"], source=source_query, cycle=cycle,
+            )
+        if by_type.get("funding_amount"):
+            await session.run(
+                """UNWIND $names AS name
+                MERGE (n:FundingEvent {amount_text: name})
+                SET n.discovered_at = coalesce(n.discovered_at, datetime()),
+                    n.source_query = coalesce(n.source_query, $source),
+                    n.cycle = coalesce(n.cycle, $cycle)""",
+                names=by_type["funding_amount"], source=source_query, cycle=cycle,
+            )
+        if by_type.get("product"):
+            await session.run(
+                """UNWIND $names AS name
+                MERGE (n:Product {name: name})
+                SET n.discovered_at = coalesce(n.discovered_at, datetime()),
+                    n.source_query = coalesce(n.source_query, $source),
+                    n.cycle = coalesce(n.cycle, $cycle)""",
+                names=by_type["product"], source=source_query, cycle=cycle,
+            )
 
 
 async def store_relationships(relationships: list[dict]):
@@ -435,24 +441,27 @@ async def get_market_gaps() -> list[dict]:
 
 
 async def store_signals(signals: list[dict], source_query: str, cycle: int):
-    """CREATE Signal nodes for free-form strategic signals."""
+    """CREATE Signal nodes for free-form strategic signals (batched)."""
+    if not signals:
+        return
+    batch = [
+        {"text": s.get("text", ""), "category": s.get("category", "unknown"),
+         "entities": s.get("entities", [])}
+        for s in signals
+    ]
     async with driver.session() as session:
-        for sig in signals:
-            await session.run(
-                """CREATE (s:Signal {
-                    text: $text,
-                    category: $category,
-                    entities: $entities,
-                    source_query: $source,
-                    cycle: $cycle,
-                    generated_at: datetime()
-                })""",
-                text=sig.get("text", ""),
-                category=sig.get("category", "unknown"),
-                entities=sig.get("entities", []),
-                source=source_query,
-                cycle=cycle,
-            )
+        await session.run(
+            """UNWIND $batch AS sig
+            CREATE (s:Signal {
+                text: sig.text,
+                category: sig.category,
+                entities: sig.entities,
+                source_query: $source,
+                cycle: $cycle,
+                generated_at: datetime()
+            })""",
+            batch=batch, source=source_query, cycle=cycle,
+        )
 
 
 async def get_signals() -> list[dict]:

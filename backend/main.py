@@ -154,9 +154,9 @@ async def ask_question(req: AskRequest):
         "threat_scoreboard": scoreboard[:10],
     }, default=str)
 
-    # 4. Ask OpenAI
+    # 4. Ask OpenAI (fast model for interactive Q&A)
     response = _openai.chat.completions.create(
-        model=OPENAI_MODEL,
+        model="gpt-4.1-mini",
         messages=[
             {"role": "system", "content": (
                 "You are a competitive intelligence analyst. Answer questions using ONLY "
