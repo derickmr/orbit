@@ -386,6 +386,8 @@ document.querySelectorAll('.tab').forEach(tab => {
 let lastLogCount = 0;
 let knownNodeIds = new Set();
 let knownEdgeIds = new Set();
+let agentActive = false;  // only poll heavy endpoints when agent has run
+let lastStatus = 'idle';
 
 async function pollStatus() {
   try {
@@ -397,6 +399,10 @@ async function pollStatus() {
     const label = document.getElementById('status-label');
     dot.className = 'status-dot ' + (data.status || '');
     label.textContent = (data.status || 'idle').toUpperCase();
+    lastStatus = data.status || 'idle';
+
+    // Mark active once agent has started (stays true until clear)
+    if (data.status === 'running' || data.status === 'complete') agentActive = true;
 
     const panel = document.getElementById('graph-panel');
     if (data.status === 'running') panel.classList.add('active');
@@ -559,7 +565,7 @@ async function triggerCycle() {
 
 async function clearGraph() {
   await fetch(`${API}/api/clear`, { method: 'POST' });
-  lastLogCount = 0;
+  lastLogCount = 0; agentActive = false;
   document.getElementById('feed').innerHTML = '';
   knownNodeIds.clear(); knownEdgeIds.clear();
   graphNodes.clear(); graphEdges.clear();
@@ -601,14 +607,14 @@ function escapeHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── Start polling ──
-setInterval(pollStatus, POLL_MS);
-setInterval(pollGraph, POLL_MS);
-setInterval(pollStats, POLL_MS);
-setInterval(pollScoreboard, POLL_MS);
-setInterval(pollActions, POLL_MS);
-setInterval(pollInsights, POLL_MS);
-pollStatus(); pollGraph(); pollStats();
+// ── Smart polling: only hit heavy endpoints when agent has run ──
+function pollAll() {
+  if (!agentActive) return;
+  pollGraph(); pollStats(); pollScoreboard(); pollActions(); pollInsights();
+}
+setInterval(pollStatus, POLL_MS);      // lightweight — always poll
+setInterval(pollAll, POLL_MS);          // heavy — only when active
+pollStatus();
 </script>
 </body>
 </html>
