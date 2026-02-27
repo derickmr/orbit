@@ -48,9 +48,12 @@ async def run_agent(company_name: str, company_description: str, max_cycles: int
         "company_name": company_name, "company_description": company_description,
     }
 
+    short_desc = company_description.split(",")[0].strip()  # e.g. "AI-powered customer support platform"
     pending_queries = [
         {"query": seed_query, "rationale": "Initial competitive landscape scan"},
         {"query": f"{company_name} market competitors alternatives", "rationale": "Direct competitor discovery"},
+        {"query": f"{short_desc} startup new company 2024 2025", "rationale": "Emerging startup discovery"},
+        {"query": f"{short_desc} Product Hunt Y Combinator 2024 2025", "rationale": "Recent startup launches"},
     ]
     completed_queries: list[str] = []
     cycle = 0
@@ -179,7 +182,7 @@ async def _run_cycle(
 
     # 2. EXTRACT
     combined_text = " ".join(r.get("content", "") for r in search_results)
-    entities = extract_entities(combined_text)
+    entities = extract_entities(combined_text, company_context)
     type_counts = Counter(e["type"] for e in entities)
     type_summary = ", ".join(f"{v} {k}" for k, v in type_counts.items())
     emit_log("extract", f"Extracted {len(entities)} entities ({type_summary})", cycle,
@@ -261,6 +264,19 @@ async def _run_cycle(
         pending_queries.append(nq)
         emit_log("query", f"Next: \"{nq['query']}\"", cycle,
                  {"rationale": nq.get("rationale", "")})
+
+    # 6b. Auto-inject startup discovery query every other cycle
+    if cycle % 2 == 0:
+        company_name = company_context.split(":")[0].strip()
+        short_desc = company_context.split(":")[1].strip().split(",")[0] if ":" in company_context else ""
+        startup_q = {
+            "query": f"new {short_desc} startups competing with {company_name} 2024 2025",
+            "rationale": "Auto-injected: discover emerging startup competitors",
+        }
+        if startup_q["query"].lower() not in [q.lower() for q in completed_queries]:
+            await graph.add_query(startup_q, cycle)
+            pending_queries.append(startup_q)
+            emit_log("query", f"Next (startup scan): \"{startup_q['query']}\"", cycle)
 
     emit_log("cycle_complete",
              f"Cycle {cycle} complete. {len(new_queries)} new queries generated.", cycle)

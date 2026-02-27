@@ -83,7 +83,8 @@ Rules:
 - Note: a dedicated relationship extraction pass already handles obvious links (person→company, company→product). Focus your relationships on COMPETITIVE and STRATEGIC connections that require analytical reasoning.
 - Generate 2-3 new search queries focused on the client company's competitive landscape
 - New queries must be DIFFERENT from previous queries
-- Focus on: direct competitors, their funding/hiring, product launches, market moves, partnership threats
+- At least ONE query must target emerging startups, recent launches, or early-stage companies in this space (e.g. "startup [space] seed series A 2024", "[space] new entrants YC Product Hunt"). Do not only focus on established players.
+- Focus on: direct competitors, their funding/hiring, product launches, market moves, partnership threats, AND emerging startups entering this space
 - threat_scores: score EVERY competitor company (not the client) 0-100 based on how much of a threat they are TO THE CLIENT. Consider: funding, product overlap, market momentum, team strength. 80+ = urgent threat, 40-79 = watch closely, <40 = minor.
 - action_items: 1-3 concrete things the CLIENT COMPANY should do RIGHT NOW. Valid types: competitive_response, talent, partnership_opportunity, monitoring, product_strategy, market_entry. Urgency: high, medium, or low.
 - Do NOT include the client company in threat_scores (they are the client, not a competitor)."""

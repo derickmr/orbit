@@ -8,25 +8,31 @@ _openai = OpenAI(api_key=OPENAI_API_KEY)
 
 ENTITY_LABELS = ["company", "person", "funding_amount", "product"]
 
-_EXTRACTION_PROMPT = """Extract entities from the following text.
+_EXTRACTION_PROMPT = """You are extracting entities for a competitive intelligence knowledge graph.
+
+DOMAIN CONTEXT: {{company_context}}
+
+Extract ONLY entities relevant to this company's competitive landscape. Ignore companies, people, or products from unrelated industries.
+
 Return ONLY valid JSON with this structure:
-{
+{{
   "entities": [
-    {"name": "Intercom", "type": "company"},
-    {"name": "Eoghan McCabe", "type": "person"},
-    {"name": "$125M Series D", "type": "funding_amount"},
-    {"name": "Fin AI", "type": "product"}
+    {{"name": "Intercom", "type": "company"}},
+    {{"name": "Eoghan McCabe", "type": "person"}},
+    {{"name": "$125M Series D", "type": "funding_amount"}},
+    {{"name": "Fin AI", "type": "product"}}
   ]
-}
+}}
 
 Valid types: company, person, funding_amount, product
 Rules:
 - Only extract clearly named entities, not generic terms
 - Deduplicate: if the same entity appears multiple times, include it once
-- funding_amount: ONLY actual investment/fundraising rounds (e.g. "$125M Series D", "$350 million funding"). Do NOT include product pricing, subscription costs, or per-unit prices (e.g. "$0.99 per conversation" is NOT a funding amount)
-- product: named software products, platforms, or tools (e.g. "Fin AI", "Zendesk Suite"). Do NOT include generic descriptions like "AI customer service agents"
-- company: ONLY extract companies that are ACTIVE PLAYERS in the competitive landscape — competitors, partners, acquirers, investors/VCs, or the subject company itself. Do NOT extract companies mentioned only as customers, clients, or case studies (e.g. if the text says "used by Honda, UNICEF, and Cisco" — do NOT extract Honda, UNICEF, or Cisco unless they are competitors or partners)
-- person: ONLY extract people who are executives, founders, or key decision-makers at relevant companies. Do NOT extract people mentioned only as customers or testimonial authors
+- RELEVANCE FILTER: Only extract entities that operate in or directly relate to the same industry/market as the company above. If the text mentions companies from unrelated sectors (e.g. autonomous vehicles, crypto, biotech when analyzing a customer support company), SKIP them entirely.
+- funding_amount: ONLY actual investment/fundraising rounds (e.g. "$125M Series D", "$350 million funding"). Do NOT include product pricing, subscription costs, or per-unit prices. Only include funding for companies relevant to the competitive landscape.
+- product: named software products, platforms, or tools relevant to the competitive landscape. Do NOT include generic descriptions.
+- company: ONLY extract companies that are ACTIVE PLAYERS in the competitive landscape — competitors, partners, acquirers, investors who funded relevant companies, or the subject company itself. Do NOT extract companies mentioned only as customers/clients, or companies from unrelated industries.
+- person: ONLY extract people who are executives, founders, or key decision-makers at relevant companies. Do NOT extract people from unrelated companies.
 - Keep entity names as they appear in the text (proper casing)
 """
 
@@ -59,14 +65,15 @@ Rules:
 """
 
 
-def extract_entities(text: str) -> list[dict]:
+def extract_entities(text: str, company_context: str = "") -> list[dict]:
     """Extract entities from text using OpenAI. Returns list of {name, type}."""
     text = text[:8000]
+    prompt = _EXTRACTION_PROMPT.format(company_context=company_context or "Not specified")
     response = _openai.chat.completions.create(
         model="gpt-4.1-mini",
         response_format={"type": "json_object"},
         messages=[
-            {"role": "system", "content": _EXTRACTION_PROMPT},
+            {"role": "system", "content": prompt},
             {"role": "user", "content": text},
         ],
         temperature=0,
