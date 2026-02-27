@@ -160,12 +160,56 @@ Rules:
 - Market gaps must be SPECIFIC, not generic ("no one does X for Y segment" not "there's room for innovation")
 - Strategic actions must be things the client COULDN'T have figured out without this cross-source analysis
 - Generate 2-4 hidden connections, 2-3 market gaps, 1-3 strategic actions
-- Valid action types: competitive_response, talent, partnership_opportunity, monitoring, product_strategy, market_entry"""
+- Valid action types: competitive_response, talent, partnership_opportunity, monitoring, product_strategy, market_entry
+
+4. MONEY TRAIL — Trace funding and investment flows through the graph. Identify:
+   - Investors that appear connected to multiple competitors (capital concentration)
+   - Funding chains: Investor A → Company X, Investor A → Company Y → what does shared funding mean?
+   - Where the "smart money" is flowing and what it signals about market direction
+   - Total capital deployed against the client company's market position
+
+5. PREDICTIONS — Based on ALL patterns observed across the full graph, make specific time-bound predictions about what competitors will do next. Each prediction must cite concrete evidence from the graph. Examples:
+   - "Company X will likely acquire a small AI startup within 12 months" (evidence: large funding round + hiring pattern + product gap)
+   - "Investor Y will lead a round in a new entrant to this space" (evidence: portfolio pattern + market gap)
+   - "Company Z will pivot from segment A to segment B" (evidence: hiring changes + product announcements)
+
+Add these to your JSON response:
+
+  "money_trail": [
+    {{
+      "description": "Narrative description of the funding flow or capital pattern",
+      "entities": ["Investor A", "Company X", "Company Y"],
+      "total_capital": "$350M+ flowing into direct competitors",
+      "implication": "What this capital concentration means for the client company"
+    }}
+  ],
+  "predictions": [
+    {{
+      "prediction": "Specific, time-bound prediction about a competitor or market move",
+      "confidence": 0.75,
+      "timeframe": "6-12 months",
+      "evidence": ["Evidence point 1 from the graph", "Evidence point 2", "Evidence point 3"],
+      "impact_on_client": "How this prediction, if true, affects the client company"
+    }}
+  ]
+
+Rules for money_trail:
+- Only include funding flows that involve entities ACTUALLY in the graph
+- Focus on capital flowing toward the client's competitive space
+- Generate 1-3 money trail items
+
+Rules for predictions:
+- Each prediction MUST cite at least 2 pieces of evidence from the graph
+- Confidence: 0.9+ = near certain, 0.7-0.89 = likely, 0.5-0.69 = possible
+- Timeframe must be specific (e.g., "3-6 months", "within 12 months")
+- Generate 2-4 predictions"""
 
 _DEEP_EMPTY = {
     "hidden_connections": [],
     "market_gaps": [],
     "strategic_actions": [],
+    "money_trail": [],
+    "predictions": [],
 }
 
 

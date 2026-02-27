@@ -159,6 +159,29 @@ async def _run_deep_analysis(company_context: str, cycle: int):
                  f"STRATEGIC [{action.get('urgency', 'low').upper()}]: \"{action['action'][:80]}\"",
                  cycle, {"action": action})
 
+    for trail in analysis.get("money_trail", []):
+        await graph.store_insight({
+            "text": trail.get("description", ""),
+            "confidence": 0.85,
+            "reasoning": trail.get("implication", ""),
+        }, cycle)
+        emit_log("money_trail",
+                 f"MONEY: \"{trail.get('description', '')[:80]}\" → {trail.get('total_capital', '')}",
+                 cycle, {"trail": trail})
+
+    for pred in analysis.get("predictions", []):
+        conf = pred.get("confidence", 0.5)
+        urgency = "high" if conf >= 0.8 else "medium" if conf >= 0.6 else "low"
+        await graph.store_action_items([{
+            "action": f"[PREDICTION] {pred.get('prediction', '')}",
+            "urgency": urgency,
+            "type": "prediction",
+            "related_entities": [],
+        }], cycle)
+        emit_log("prediction",
+                 f"PREDICT ({conf:.0%}): \"{pred.get('prediction', '')[:80]}\" [{pred.get('timeframe', '')}]",
+                 cycle, {"prediction": pred})
+
 
 async def _run_cycle(
     company_context: str,
