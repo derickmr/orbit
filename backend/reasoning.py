@@ -85,6 +85,113 @@ Rules:
 - Do NOT include the client company in threat_scores (they are the client, not a competitor)."""
 
 
+_DEEP_ANALYSIS_PROMPT = """You are a senior competitive intelligence analyst. You have access to a knowledge graph that was built by searching multiple sources across multiple research cycles. Your job is to find what NO SINGLE SOURCE reveals — the hidden patterns that only emerge when you connect dots across the entire graph.
+
+YOUR CLIENT COMPANY: {company_context}
+
+FULL KNOWLEDGE GRAPH:
+{full_graph}
+
+ALL RELATIONSHIPS DISCOVERED:
+{all_relationships}
+
+ALL EXISTING INSIGHTS:
+{existing_insights}
+
+RESEARCH CYCLES COMPLETED: {cycle_count}
+Each entity has a "cycle" and "source_query" showing when and how it was discovered.
+
+Your task is THREE things:
+
+1. HIDDEN CONNECTIONS — Find relationships between entities that appeared in DIFFERENT research cycles or from DIFFERENT search queries. These are the insights that make a knowledge graph valuable. Examples:
+   - "Person X (discovered via competitor research) previously worked at Company Y (discovered via funding research) — suggesting insider knowledge transfer"
+   - "Three companies that seem unrelated all share the same investor, suggesting coordinated market entry"
+   - "A hiring pattern across 2 competitors suggests they're both pivoting to the same market segment"
+   The key: each connection must cite AT LEAST 2 different sources/cycles.
+
+2. MARKET GAPS — What is NOBODY in this competitive landscape doing? What opportunities exist for the client? Look for:
+   - Customer segments nobody is serving
+   - Technical capabilities nobody has built
+   - Geographic markets nobody has entered
+   - Pricing tiers that don't exist
+   - Integration partnerships nobody has formed
+
+3. STRATEGIC ACTIONS — Based on the hidden connections and gaps, what should the client company do RIGHT NOW? These should be specific and non-obvious — things that only become clear from analyzing the full graph.
+
+Respond with ONLY valid JSON:
+
+{{
+  "hidden_connections": [
+    {{
+      "text": "Description of the non-obvious connection",
+      "confidence": 0.9,
+      "sources": ["Cycle 1: query that found entity A", "Cycle 3: query that found entity B"],
+      "reasoning": "Why this connection matters and how it was invisible in any single source"
+    }}
+  ],
+  "market_gaps": [
+    {{
+      "gap": "Description of what's missing in the market",
+      "opportunity": "How the client company could exploit this gap",
+      "reasoning": "Evidence from the graph supporting this gap exists"
+    }}
+  ],
+  "strategic_actions": [
+    {{
+      "action": "Specific, concrete action the client should take",
+      "urgency": "high",
+      "type": "competitive_response",
+      "reasoning": "Why this action is recommended based on cross-source analysis",
+      "related_entities": ["Entity A", "Entity B"]
+    }}
+  ]
+}}
+
+Rules:
+- hidden_connections MUST reference entities from at least 2 different cycles or search queries
+- Market gaps must be SPECIFIC, not generic ("no one does X for Y segment" not "there's room for innovation")
+- Strategic actions must be things the client COULDN'T have figured out without this cross-source analysis
+- Generate 2-4 hidden connections, 2-3 market gaps, 1-3 strategic actions
+- Valid action types: competitive_response, talent, partnership_opportunity, monitoring, product_strategy, market_entry"""
+
+_DEEP_EMPTY = {
+    "hidden_connections": [],
+    "market_gaps": [],
+    "strategic_actions": [],
+}
+
+
+def generate_deep_analysis(
+    company_context: str,
+    full_graph_context: list[dict],
+    all_relationships: list[dict],
+    existing_insights: list[dict],
+    cycle_count: int,
+) -> dict:
+    """Analyze the full graph for cross-source connections, gaps, and strategic actions."""
+    prompt = _DEEP_ANALYSIS_PROMPT.format(
+        company_context=company_context,
+        full_graph=json.dumps(full_graph_context, default=str),
+        all_relationships=json.dumps(all_relationships, default=str),
+        existing_insights=json.dumps(existing_insights[:15], default=str),
+        cycle_count=cycle_count,
+    )
+
+    try:
+        response = _openai.chat.completions.create(
+            model=OPENAI_MODEL,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": "Analyze the full knowledge graph. Find hidden connections across sources, identify market gaps, and recommend strategic actions."},
+            ],
+            temperature=0.7,
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception:
+        return _DEEP_EMPTY
+
+
 _EMPTY_RESULT = {
     "insights": [],
     "relationships": [],

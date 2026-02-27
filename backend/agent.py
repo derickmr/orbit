@@ -8,7 +8,7 @@ from datetime import datetime
 from backend.config import MAX_CYCLES, DEBUG
 from backend.discovery import tavily_search
 from backend.extraction import extract_entities
-from backend.reasoning import generate_reasoning
+from backend.reasoning import generate_reasoning, generate_deep_analysis
 from backend import graph
 
 # ── In-memory state shared with FastAPI ──
@@ -75,6 +75,9 @@ async def run_agent(company_name: str, company_description: str, max_cycles: int
                 emit_log("error", f"Cycle {cycle} failed: {e}", cycle)
                 _dump_debug(cycle, "error", {"error": str(e)})
 
+        # Deep analysis pass — cross-source connections + gap analysis
+        await _run_deep_analysis(company_context, cycle)
+
         agent_status["status"] = "complete"
         emit_log("cycle_complete", f"Agent finished after {cycle} cycles.", cycle)
     except Exception as e:
@@ -103,10 +106,53 @@ async def run_single_cycle(company_name: str, company_description: str):
             company_context, query, {"query": query, "rationale": "Manual trigger"},
             cycle, [], [query],
         )
+        await _run_deep_analysis(company_context, cycle)
     except Exception as e:
         emit_log("error", f"Triggered cycle failed: {e}", cycle)
 
     agent_status["status"] = "complete"
+
+
+async def _run_deep_analysis(company_context: str, cycle: int):
+    """Run cross-source deep analysis on the full graph."""
+    emit_log("reason", "Running deep analysis across all sources...", cycle)
+
+    full_context = await graph.get_full_graph_context()
+    existing_insights = await graph.get_insights()
+
+    if not full_context["nodes"]:
+        return
+
+    analysis = generate_deep_analysis(
+        company_context=company_context,
+        full_graph_context=full_context["nodes"],
+        all_relationships=full_context["relationships"],
+        existing_insights=existing_insights,
+        cycle_count=cycle,
+    )
+    _dump_debug(cycle, "deep_analysis", analysis)
+
+    for conn in analysis.get("hidden_connections", []):
+        await graph.store_insight({
+            "text": conn["text"],
+            "confidence": conn.get("confidence", 0.8),
+            "reasoning": conn.get("reasoning", ""),
+        }, cycle)
+        emit_log("deep_insight",
+                 f"HIDDEN: \"{conn['text'][:100]}\"", cycle,
+                 {"connection": conn})
+
+    for gap in analysis.get("market_gaps", []):
+        await graph.store_market_gaps([gap], cycle)
+        emit_log("market_gap",
+                 f"GAP: \"{gap['gap'][:80]}\" → {gap.get('opportunity', '')[:60]}", cycle,
+                 {"gap": gap})
+
+    for action in analysis.get("strategic_actions", []):
+        await graph.store_action_items([action], cycle)
+        emit_log("action",
+                 f"STRATEGIC [{action.get('urgency', 'low').upper()}]: \"{action['action'][:80]}\"",
+                 cycle, {"action": action})
 
 
 async def _run_cycle(

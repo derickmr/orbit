@@ -346,6 +346,71 @@ async def get_insights() -> list[dict]:
         return [record.data() async for record in result]
 
 
+async def get_full_graph_context() -> dict:
+    """Return all nodes with their properties, relationships, and source info for deep analysis."""
+    nodes = []
+    relationships = []
+    async with driver.session() as session:
+        node_result = await session.run(
+            """MATCH (n)
+            WHERE n:Company OR n:Person OR n:FundingEvent OR n:Product
+            RETURN labels(n)[0] AS type,
+                   coalesce(n.name, n.amount_text, '') AS name,
+                   n.cycle AS cycle,
+                   n.source_query AS source_query,
+                   n.threat_score AS threat_score"""
+        )
+        async for record in node_result:
+            nodes.append(record.data())
+
+        rel_result = await session.run(
+            """MATCH (a)-[r]->(b)
+            WHERE (a:Company OR a:Person OR a:FundingEvent OR a:Product)
+              AND (b:Company OR b:Person OR b:FundingEvent OR b:Product)
+            RETURN coalesce(a.name, a.amount_text, '') AS from_name,
+                   labels(a)[0] AS from_type,
+                   type(r) AS relationship,
+                   coalesce(b.name, b.amount_text, '') AS to_name,
+                   labels(b)[0] AS to_type"""
+        )
+        async for record in rel_result:
+            relationships.append(record.data())
+
+    return {"nodes": nodes, "relationships": relationships}
+
+
+async def store_market_gaps(gaps: list[dict], cycle: int):
+    """CREATE MarketGap nodes."""
+    async with driver.session() as session:
+        for gap in gaps:
+            await session.run(
+                """CREATE (g:MarketGap {
+                    gap: $gap,
+                    opportunity: $opportunity,
+                    reasoning: $reasoning,
+                    cycle: $cycle,
+                    generated_at: datetime()
+                })""",
+                gap=gap.get("gap", ""),
+                opportunity=gap.get("opportunity", ""),
+                reasoning=gap.get("reasoning", ""),
+                cycle=cycle,
+            )
+
+
+async def get_market_gaps() -> list[dict]:
+    """Return all MarketGap nodes sorted by cycle (newest first)."""
+    async with driver.session() as session:
+        result = await session.run(
+            """MATCH (g:MarketGap)
+            RETURN g.gap AS gap, g.opportunity AS opportunity,
+                   g.reasoning AS reasoning, g.cycle AS cycle,
+                   g.generated_at AS generated_at
+            ORDER BY g.cycle DESC"""
+        )
+        return [record.data() async for record in result]
+
+
 async def clear_graph():
     """Delete all nodes and edges."""
     async with driver.session() as session:
