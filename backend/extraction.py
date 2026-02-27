@@ -23,7 +23,9 @@ Valid types: company, person, funding_amount, product
 Rules:
 - Only extract clearly named entities, not generic terms
 - Deduplicate: if the same entity appears multiple times, include it once
-- For funding_amount, include the amount and round type if available
+- funding_amount: ONLY actual investment/fundraising rounds (e.g. "$125M Series D", "$350 million funding"). Do NOT include product pricing, subscription costs, or per-unit prices (e.g. "$0.99 per conversation" is NOT a funding amount)
+- product: named software products, platforms, or tools (e.g. "Fin AI", "Zendesk Suite"). Do NOT include generic descriptions like "AI customer service agents"
+- company: real company names only, not investor types or generic terms
 - Keep entity names as they appear in the text (proper casing)
 """
 
