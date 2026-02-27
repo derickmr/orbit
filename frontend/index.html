@@ -250,6 +250,51 @@
 
   .empty-state { padding: 24px; text-align: center; color: #475569; font-size: 13px; }
 
+  /* ── Alert Banners ── */
+  .alert-container {
+    position: absolute; top: 0; left: 0; right: 0;
+    z-index: 20; display: flex; flex-direction: column;
+    align-items: center; pointer-events: none;
+    padding: 16px; gap: 8px;
+  }
+  .alert-banner {
+    pointer-events: auto;
+    padding: 14px 22px; border-radius: 10px;
+    font-size: 13px; display: flex; align-items: center; gap: 12px;
+    animation: alertSlideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    max-width: 600px; width: fit-content;
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    backdrop-filter: blur(12px);
+  }
+  .alert-banner.dismissing { opacity: 0; transform: translateY(-10px); }
+  .alert-banner.threat {
+    background: linear-gradient(135deg, rgba(30,5,5,0.95), rgba(50,15,15,0.95));
+    border: 1px solid #EF4444;
+    color: #FCA5A5;
+    box-shadow: 0 0 40px rgba(239,68,68,0.25), 0 0 80px rgba(239,68,68,0.1);
+  }
+  .alert-banner.discovery {
+    background: linear-gradient(135deg, rgba(5,26,20,0.95), rgba(13,45,37,0.95));
+    border: 1px solid #00D4AA;
+    color: #A7F3D0;
+    box-shadow: 0 0 40px rgba(0,212,170,0.15), 0 0 80px rgba(0,212,170,0.05);
+  }
+  .alert-banner.funding {
+    background: linear-gradient(135deg, rgba(26,21,5,0.95), rgba(45,37,16,0.95));
+    border: 1px solid #F59E0B;
+    color: #FDE68A;
+    box-shadow: 0 0 40px rgba(245,158,11,0.15), 0 0 80px rgba(245,158,11,0.05);
+  }
+  .alert-icon { font-size: 20px; flex-shrink: 0; }
+  .alert-body { display: flex; flex-direction: column; gap: 2px; }
+  .alert-title { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .alert-msg { font-weight: 400; font-size: 13px; line-height: 1.4; }
+
+  @keyframes alertSlideIn {
+    from { transform: translateY(-40px) scale(0.95); opacity: 0; }
+    to { transform: translateY(0) scale(1); opacity: 1; }
+  }
+
   /* scrollbar */
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -283,6 +328,7 @@
   <!-- Graph -->
   <div class="graph-panel" id="graph-panel">
     <div id="graph-container"></div>
+    <div class="alert-container" id="alert-container"></div>
     <div class="node-detail" id="node-detail">
       <div class="node-detail-header">
         <h3 id="node-detail-name"></h3>
@@ -367,6 +413,38 @@ const NODE_COLORS = {
   FundingEvent: '#F59E0B', Product: '#8B5CF6', Insight: '#EF4444',
 };
 const CLIENT_COLOR = '#00D4AA';
+
+// ── Alert System ──
+let knownThreats = new Map();
+let knownFundingIds = new Set();
+const ALERT_DURATION = 6000;
+const MAX_ALERTS = 3;
+const NODE_GLOW = {
+  Company: 'rgba(59,130,246,0.8)',
+  Person: 'rgba(16,185,129,0.8)',
+  FundingEvent: 'rgba(245,158,11,0.8)',
+  Product: 'rgba(139,92,246,0.8)',
+  Insight: 'rgba(239,68,68,0.8)',
+};
+
+function showAlert(type, title, message) {
+  const container = document.getElementById('alert-container');
+  if (!container) return;
+  while (container.children.length >= MAX_ALERTS) container.firstChild.remove();
+  const banner = document.createElement('div');
+  banner.className = `alert-banner ${type}`;
+  const icons = { threat: '⚠️', funding: '💰', discovery: '🧬' };
+  banner.innerHTML = `<span class="alert-icon">${icons[type] || '📡'}</span>
+    <div class="alert-body">
+      <div class="alert-title">${escapeHtml(title)}</div>
+      <div class="alert-msg">${escapeHtml(message)}</div>
+    </div>`;
+  container.appendChild(banner);
+  setTimeout(() => {
+    banner.classList.add('dismissing');
+    setTimeout(() => banner.remove(), 500);
+  }, ALERT_DURATION);
+}
 
 // ── Graph Setup ──
 const graphNodes = new vis.DataSet();
@@ -497,6 +575,10 @@ async function pollGraph() {
     const connectedIds = new Set();
     edges.forEach(e => { connectedIds.add(e.source); connectedIds.add(e.target); });
 
+    // Map funding events → company for alert context
+    const fundingCompanyMap = {};
+    edges.forEach(e => { if (e.relationship === 'RAISED') fundingCompanyMap[e.target] = e.source; });
+
     // Get client company name for special styling
     const clientName = document.getElementById('company-name').value.trim().toLowerCase();
 
@@ -507,6 +589,9 @@ async function pollGraph() {
       const scores = await sr.json();
       scores.forEach(s => { threatMap[s.company] = s.score; });
     } catch (e) { /* ignore */ }
+
+    const newNodes = [];
+    const fundingAlerts = [];
 
     // Add only connected nodes (hide orphans)
     nodes.forEach(n => {
@@ -524,6 +609,7 @@ async function pollGraph() {
         size = isClient ? 35 : (threat > 0 ? 16 + Math.round(threat * 0.12) : 16);
       }
 
+      const glowColor = NODE_GLOW[n.type] || 'rgba(0,212,170,0.8)';
       graphNodes.add({
         id: n.id,
         label: n.name || n.type,
@@ -534,15 +620,48 @@ async function pollGraph() {
         },
         borderWidth: isClient ? 3 : 2,
         shape: n.type === 'Insight' ? 'diamond' : 'dot',
-        size: size,
+        size: isClient ? size : size + 6,
         font: { color: '#E2E8F0', size: isClient ? 16 : 12, bold: isClient },
         title: `${n.type}: ${n.name}${threat ? ' (threat: ' + threat + ')' : ''}`,
         fixed: isClient ? { x: true, y: true } : false,
         x: isClient ? 0 : undefined,
         y: isClient ? 0 : undefined,
+        shadow: isClient ? undefined : { enabled: true, color: glowColor, size: 25, x: 0, y: 0 },
       });
       knownNodeIds.add(n.id);
+      newNodes.push({ id: n.id, type: n.type, name: n.name, normalSize: size });
+
+      // Detect new funding events
+      if (n.type === 'FundingEvent' && !knownFundingIds.has(n.id)) {
+        knownFundingIds.add(n.id);
+        const companyId = fundingCompanyMap[n.id];
+        const companyNode = companyId ? nodes.find(nd => nd.id === companyId) : null;
+        fundingAlerts.push(companyNode ? `${companyNode.name} raised ${n.name}` : n.name);
+      }
     });
+
+    // Animate glow fade: new nodes pop in bright, then settle
+    newNodes.forEach((nn, idx) => {
+      setTimeout(() => {
+        try {
+          graphNodes.update({
+            id: nn.id, size: nn.normalSize,
+            shadow: { enabled: true, color: 'rgba(0,0,0,0.15)', size: 3, x: 2, y: 2 },
+          });
+        } catch (e) {}
+      }, 2000 + idx * 150);
+    });
+
+    // Fire discovery alert for batches of new entities
+    if (newNodes.length >= 3) {
+      const counts = {};
+      newNodes.forEach(nn => { counts[nn.type] = (counts[nn.type] || 0) + 1; });
+      const summary = Object.entries(counts).map(([t, c]) => `${c} ${t}${c > 1 ? 's' : ''}`).join(', ');
+      showAlert('discovery', 'New Intelligence', summary + ' discovered');
+    }
+
+    // Fire funding alerts
+    fundingAlerts.forEach(msg => showAlert('funding', 'Funding Detected', msg));
 
     edges.forEach(e => {
       const eid = `${e.source}-${e.relationship}-${e.target}`;
@@ -573,6 +692,18 @@ async function pollScoreboard() {
     const items = await res.json();
     const el = document.getElementById('scoreboard');
     if (!items.length) { el.innerHTML = '<div class="empty-state">No threat scores yet.</div>'; return; }
+
+    // Detect new or escalating threats → fire alerts
+    items.forEach(s => {
+      const prev = knownThreats.get(s.company);
+      if (prev === undefined && s.score >= 60) {
+        showAlert('threat', 'Threat Detected', `${s.company} — Score ${s.score} — ${s.rationale || 'New competitor identified'}`);
+      } else if (prev !== undefined && s.score - prev >= 15 && s.score >= 60) {
+        showAlert('threat', 'Threat Escalation', `${s.company} surged to ${s.score} (+${s.score - prev})`);
+      }
+      knownThreats.set(s.company, s.score);
+    });
+
     el.innerHTML = items.map((s, i) => {
       const level = s.score >= 80 ? 'high' : s.score >= 40 ? 'medium' : 'low';
       const barColor = s.score >= 80 ? '#EF4444' : s.score >= 40 ? '#F59E0B' : '#10B981';
@@ -694,6 +825,8 @@ async function clearGraph() {
   lastLogCount = 0; agentActive = false;
   document.getElementById('feed').innerHTML = '';
   knownNodeIds.clear(); knownEdgeIds.clear();
+  knownThreats.clear(); knownFundingIds.clear();
+  document.getElementById('alert-container').innerHTML = '';
   graphNodes.clear(); graphEdges.clear();
   document.getElementById('ask-answer').classList.remove('visible');
   document.getElementById('ask-answer').innerHTML = '';
