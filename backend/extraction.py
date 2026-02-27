@@ -29,6 +29,34 @@ Rules:
 - Keep entity names as they appear in the text (proper casing)
 """
 
+_SIGNALS_PROMPT = """You are extracting strategic signals from competitive intelligence text. Go beyond named entities — capture any notable events, trends, moves, or facts that could matter for competitive analysis.
+
+Return ONLY valid JSON:
+{
+  "signals": [
+    {
+      "text": "Short description of the signal",
+      "category": "auto-detected category",
+      "entities": ["Entity A", "Entity B"]
+    }
+  ]
+}
+
+Categories can be ANYTHING relevant, for example:
+- partnership, acquisition, hiring, layoff, product_launch, pivot
+- market_expansion, pricing_change, regulatory, leadership_change
+- technology_shift, customer_churn, geographic_expansion
+- Or any other category that fits — do NOT constrain yourself to this list.
+
+Rules:
+- Extract 3-8 signals per text
+- Each signal should be a specific, factual observation — not a generic summary
+- "entities" lists any companies, people, or products mentioned in that signal
+- Focus on things that are STRATEGICALLY relevant: moves, shifts, announcements, patterns
+- Do NOT repeat the same signal in different words
+- Keep signal text concise (1 sentence)
+"""
+
 
 def extract_entities(text: str) -> list[dict]:
     """Extract entities from text using OpenAI. Returns list of {name, type}."""
@@ -50,3 +78,31 @@ def extract_entities(text: str) -> list[dict]:
         for e in entities
         if e.get("name") and e.get("type", "").lower() in ENTITY_LABELS
     ]
+
+
+def extract_signals(text: str) -> list[dict]:
+    """Extract free-form strategic signals from text. Returns list of {text, category, entities}."""
+    text = text[:8000]
+    try:
+        response = _openai.chat.completions.create(
+            model="gpt-4o-mini",
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": _SIGNALS_PROMPT},
+                {"role": "user", "content": text},
+            ],
+            temperature=0,
+        )
+        raw = json.loads(response.choices[0].message.content)
+        signals = raw.get("signals", [])
+        return [
+            {
+                "text": s["text"].strip(),
+                "category": s.get("category", "unknown").lower().strip(),
+                "entities": s.get("entities", []),
+            }
+            for s in signals
+            if s.get("text")
+        ]
+    except Exception:
+        return []

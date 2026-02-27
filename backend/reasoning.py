@@ -25,6 +25,9 @@ NEW DATA DISCOVERED THIS CYCLE (query: "{current_query}"):
 EXTRACTED ENTITIES FROM THIS CYCLE:
 {entities_summary}
 
+STRATEGIC SIGNALS DETECTED THIS CYCLE (free-form observations):
+{signals_summary}
+
 PREVIOUS QUERIES (do not repeat these):
 {previous_queries}
 
@@ -98,6 +101,9 @@ ALL RELATIONSHIPS DISCOVERED:
 ALL EXISTING INSIGHTS:
 {existing_insights}
 
+ALL STRATEGIC SIGNALS (free-form observations from all cycles):
+{all_signals}
+
 RESEARCH CYCLES COMPLETED: {cycle_count}
 Each entity has a "cycle" and "source_query" showing when and how it was discovered.
 
@@ -166,14 +172,20 @@ def generate_deep_analysis(
     full_graph_context: list[dict],
     all_relationships: list[dict],
     existing_insights: list[dict],
+    all_signals: list[dict],
     cycle_count: int,
 ) -> dict:
     """Analyze the full graph for cross-source connections, gaps, and strategic actions."""
+    signals_str = "\n".join(
+        f"- [Cycle {s.get('cycle', '?')}, {s.get('category', 'unknown')}] {s.get('text', '')}"
+        for s in all_signals[:30]
+    ) or "None"
     prompt = _DEEP_ANALYSIS_PROMPT.format(
         company_context=company_context,
         full_graph=json.dumps(full_graph_context, default=str),
         all_relationships=json.dumps(all_relationships, default=str),
         existing_insights=json.dumps(existing_insights[:15], default=str),
+        all_signals=signals_str,
         cycle_count=cycle_count,
     )
 
@@ -206,6 +218,7 @@ def generate_reasoning(
     current_query: str,
     search_results: list[dict],
     entities: list[dict],
+    signals: list[dict],
     graph_context: list[dict],
     graph_stats: dict,
     previous_queries: list[str],
@@ -218,6 +231,10 @@ def generate_reasoning(
     )
     entities_summary = ", ".join(
         f"{e['name']} ({e['type']})" for e in entities
+    ) or "None"
+    signals_summary = "\n".join(
+        f"- [{s.get('category', 'unknown')}] {s['text']}"
+        for s in signals
     ) or "None"
     context_str = json.dumps(graph_context, default=str) if graph_context else "No prior context"
     queries_str = ", ".join(f'"{q}"' for q in previous_queries) or "None"
@@ -232,6 +249,7 @@ def generate_reasoning(
         current_query=current_query,
         search_summary=search_summary,
         entities_summary=entities_summary,
+        signals_summary=signals_summary,
         previous_queries=queries_str,
     )
 

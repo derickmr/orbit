@@ -169,6 +169,23 @@
   .insight-bar-bg { width: 100%; height: 4px; background: #1E293B; border-radius: 2px; margin-top: 8px; }
   .insight-bar { height: 100%; border-radius: 2px; }
 
+  /* ── Signals ── */
+  .signals-list { padding: 12px; }
+  .signal-card {
+    padding: 10px 12px; margin-bottom: 8px;
+    background: #1A2540; border-radius: 8px;
+    border-left: 3px solid #F97316;
+  }
+  .signal-category {
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px; padding: 2px 6px; border-radius: 3px;
+    display: inline-block; margin-bottom: 4px;
+    background: #F973161A; color: #F97316;
+  }
+  .signal-text { font-size: 13px; line-height: 1.4; }
+  .signal-entities { font-size: 11px; color: #64748B; margin-top: 4px; }
+  .signal-cycle { font-size: 10px; color: #475569; margin-top: 2px; }
+
   /* ── Node Detail Panel ── */
   .node-detail {
     display: none; position: absolute; top: 16px; right: 16px;
@@ -255,6 +272,7 @@
   <div class="stat"><div class="value" id="stat-people">0</div><div class="label">People</div></div>
   <div class="stat"><div class="value" id="stat-funding">0</div><div class="label">Funding</div></div>
   <div class="stat"><div class="value" id="stat-products">0</div><div class="label">Products</div></div>
+  <div class="stat"><div class="value" id="stat-signals">0</div><div class="label">Signals</div></div>
   <div class="stat"><div class="value" id="stat-insights">0</div><div class="label">Insights</div></div>
   <div class="stat"><div class="value" id="stat-rels">0</div><div class="label">Relationships</div></div>
 </div>
@@ -282,6 +300,7 @@
       <div class="tab" data-tab="scoreboard">Threats</div>
       <div class="tab" data-tab="actions">Actions</div>
       <div class="tab" data-tab="gaps">Gaps</div>
+      <div class="tab" data-tab="signals">Signals</div>
       <div class="tab" data-tab="insights">Insights</div>
     </div>
     <div class="tab-content active" id="tab-feed">
@@ -300,6 +319,11 @@
     <div class="tab-content" id="tab-gaps">
       <div class="gaps-list" id="gaps-list">
         <div class="empty-state">No market gaps identified yet. Deep analysis runs after discovery cycles.</div>
+      </div>
+    </div>
+    <div class="tab-content" id="tab-signals">
+      <div class="signals-list" id="signals-list">
+        <div class="empty-state">No signals yet. Signals capture strategic moves, trends, and events beyond named entities.</div>
       </div>
     </div>
     <div class="tab-content" id="tab-insights">
@@ -334,7 +358,7 @@ const EMOJI = {
   search: '🔍', extract: '🧬', insight: '💡', relationship: '🔗',
   stored: '🆕', query: '🎯', reason: '🧠', error: '❌',
   cycle_start: '🔄', cycle_complete: '✅', threat: '⚠️', action: '🎬',
-  deep_insight: '🔮', market_gap: '🎯',
+  deep_insight: '🔮', market_gap: '🎯', signal: '📡',
 };
 
 const NODE_COLORS = {
@@ -498,6 +522,7 @@ async function pollStats() {
     document.getElementById('stat-people').textContent = s.people || 0;
     document.getElementById('stat-funding').textContent = s.funding_events || 0;
     document.getElementById('stat-products').textContent = s.products || 0;
+    document.getElementById('stat-signals').textContent = s.signals || 0;
     document.getElementById('stat-insights').textContent = s.insights || 0;
     document.getElementById('stat-rels').textContent = s.relationships || 0;
   } catch (err) { /* ignore */ }
@@ -561,6 +586,24 @@ async function pollGaps() {
         <div class="gap-text">${escapeHtml(g.gap)}</div>
         <div class="gap-opportunity">→ ${escapeHtml(g.opportunity || '')}</div>
         <div class="gap-reasoning">${escapeHtml(g.reasoning || '')}</div>
+      </div>`;
+    }).join('');
+  } catch (err) { /* ignore */ }
+}
+
+async function pollSignals() {
+  try {
+    const res = await fetch(`${API}/api/signals`);
+    const items = await res.json();
+    const el = document.getElementById('signals-list');
+    if (!items.length) { el.innerHTML = '<div class="empty-state">No signals yet.</div>'; return; }
+    el.innerHTML = items.map(s => {
+      const entities = (s.entities || []).join(', ');
+      return `<div class="signal-card">
+        <span class="signal-category">${escapeHtml(s.category)}</span>
+        <div class="signal-text">${escapeHtml(s.text)}</div>
+        ${entities ? `<div class="signal-entities">→ ${escapeHtml(entities)}</div>` : ''}
+        <div class="signal-cycle">Cycle ${s.cycle || '?'}</div>
       </div>`;
     }).join('');
   } catch (err) { /* ignore */ }
@@ -654,7 +697,7 @@ function escapeHtml(s) {
 // ── Smart polling: only hit heavy endpoints when agent has run ──
 function pollAll() {
   if (!agentActive) return;
-  pollGraph(); pollStats(); pollScoreboard(); pollActions(); pollGaps(); pollInsights();
+  pollGraph(); pollStats(); pollScoreboard(); pollActions(); pollGaps(); pollSignals(); pollInsights();
 }
 setInterval(pollStatus, POLL_MS);      // lightweight — always poll
 setInterval(pollAll, POLL_MS);          // heavy — only when active

@@ -111,6 +111,11 @@ async def get_gaps():
     return await graph.get_market_gaps()
 
 
+@app.get("/api/signals")
+async def get_signals():
+    return await graph.get_signals()
+
+
 @app.post("/api/trigger-cycle")
 async def trigger_cycle(bg: BackgroundTasks):
     if agent_status["status"] == "running":

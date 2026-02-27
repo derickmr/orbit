@@ -7,7 +7,7 @@ from datetime import datetime
 
 from backend.config import MAX_CYCLES, DEBUG
 from backend.discovery import tavily_search
-from backend.extraction import extract_entities
+from backend.extraction import extract_entities, extract_signals
 from backend.reasoning import generate_reasoning, generate_deep_analysis
 from backend import graph
 
@@ -119,6 +119,7 @@ async def _run_deep_analysis(company_context: str, cycle: int):
 
     full_context = await graph.get_full_graph_context()
     existing_insights = await graph.get_insights()
+    all_signals = await graph.get_signals()
 
     if not full_context["nodes"]:
         return
@@ -128,6 +129,7 @@ async def _run_deep_analysis(company_context: str, cycle: int):
         full_graph_context=full_context["nodes"],
         all_relationships=full_context["relationships"],
         existing_insights=existing_insights,
+        all_signals=all_signals,
         cycle_count=cycle,
     )
     _dump_debug(cycle, "deep_analysis", analysis)
@@ -184,10 +186,21 @@ async def _run_cycle(
              {"entities": entities[:10]})
     _dump_debug(cycle, "entities", entities)
 
-    # 3. STORE entities
+    # 2b. EXTRACT SIGNALS (free-form layer)
+    signals = extract_signals(combined_text)
+    cat_counts = Counter(s["category"] for s in signals)
+    cat_summary = ", ".join(f"{v} {k}" for k, v in cat_counts.items())
+    emit_log("extract", f"Extracted {len(signals)} signals ({cat_summary})", cycle,
+             {"signals": signals[:10]})
+    _dump_debug(cycle, "signals", signals)
+
+    # 3. STORE entities + signals
     await graph.store_entities(entities, query, cycle)
     for entity in entities:
         emit_log("stored", f"NEW: {entity['type'].title()} \"{entity['name']}\"", cycle)
+    await graph.store_signals(signals, query, cycle)
+    for sig in signals:
+        emit_log("signal", f"SIGNAL [{sig['category']}]: \"{sig['text'][:80]}\"", cycle)
 
     # 4. REASON
     emit_log("reason", "Reasoning about connections...", cycle)
@@ -198,6 +211,7 @@ async def _run_cycle(
         current_query=query,
         search_results=search_results,
         entities=entities,
+        signals=signals,
         graph_context=graph_context,
         graph_stats=stats,
         previous_queries=completed_queries,

@@ -246,12 +246,12 @@ async def get_graph_stats() -> dict:
         )
         stats = {
             "companies": 0, "people": 0, "funding_events": 0,
-            "products": 0, "insights": 0, "queries": 0,
+            "products": 0, "insights": 0, "queries": 0, "signals": 0,
         }
         label_map = {
             "Company": "companies", "Person": "people",
             "FundingEvent": "funding_events", "Product": "products",
-            "Insight": "insights", "Query": "queries",
+            "Insight": "insights", "Query": "queries", "Signal": "signals",
         }
         async for record in result:
             key = label_map.get(record["label"])
@@ -407,6 +407,40 @@ async def get_market_gaps() -> list[dict]:
                    g.reasoning AS reasoning, g.cycle AS cycle,
                    g.generated_at AS generated_at
             ORDER BY g.cycle DESC"""
+        )
+        return [record.data() async for record in result]
+
+
+async def store_signals(signals: list[dict], source_query: str, cycle: int):
+    """CREATE Signal nodes for free-form strategic signals."""
+    async with driver.session() as session:
+        for sig in signals:
+            await session.run(
+                """CREATE (s:Signal {
+                    text: $text,
+                    category: $category,
+                    entities: $entities,
+                    source_query: $source,
+                    cycle: $cycle,
+                    generated_at: datetime()
+                })""",
+                text=sig.get("text", ""),
+                category=sig.get("category", "unknown"),
+                entities=sig.get("entities", []),
+                source=source_query,
+                cycle=cycle,
+            )
+
+
+async def get_signals() -> list[dict]:
+    """Return all Signal nodes sorted by cycle (newest first)."""
+    async with driver.session() as session:
+        result = await session.run(
+            """MATCH (s:Signal)
+            RETURN s.text AS text, s.category AS category,
+                   s.entities AS entities, s.source_query AS source_query,
+                   s.cycle AS cycle, s.generated_at AS generated_at
+            ORDER BY s.cycle DESC"""
         )
         return [record.data() async for record in result]
 
