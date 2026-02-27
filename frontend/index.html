@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orbit — Self-Evolving Competitive Intelligence</title>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0B1120; color: #E2E8F0;
+    font-family: 'Inter', system-ui, sans-serif;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ── */
+  .header {
+    padding: 16px 24px; display: flex; align-items: center; gap: 12px;
+    border-bottom: 1px solid #1E293B;
+  }
+  .header h1 { font-size: 20px; font-weight: 700; }
+  .header h1 span { color: #00D4AA; }
+  .header .subtitle { color: #94A3B8; font-size: 13px; margin-left: 8px; }
+  .status-dot {
+    width: 10px; height: 10px; border-radius: 50%; margin-left: auto;
+    background: #475569;
+  }
+  .status-dot.running { background: #00D4AA; animation: pulse 1.5s infinite; }
+  .status-dot.complete { background: #3B82F6; }
+  .status-dot.error { background: #EF4444; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .status-label { color: #94A3B8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* ── Stats Bar ── */
+  .stats-bar {
+    display: flex; gap: 24px; padding: 12px 24px;
+    border-bottom: 1px solid #1E293B; background: #0F172A;
+  }
+  .stat { text-align: center; }
+  .stat .value {
+    font-size: 24px; font-weight: 700; color: #00D4AA;
+    transition: all 0.3s ease;
+  }
+  .stat .label { font-size: 11px; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* ── Main Grid ── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    grid-template-rows: 1fr auto;
+    height: calc(100vh - 120px);
+  }
+
+  /* ── Graph Panel ── */
+  .graph-panel {
+    position: relative; border-right: 1px solid #1E293B;
+    transition: box-shadow 0.3s;
+  }
+  .graph-panel.active { box-shadow: inset 0 0 30px rgba(0, 212, 170, 0.05); }
+  #graph-container { width: 100%; height: 100%; }
+
+  /* ── Right Sidebar ── */
+  .sidebar {
+    display: flex; flex-direction: column;
+    overflow: hidden; background: #0F172A;
+  }
+
+  /* ── Tabs ── */
+  .tab-bar {
+    display: flex; border-bottom: 1px solid #1E293B; flex-shrink: 0;
+  }
+  .tab {
+    flex: 1; padding: 10px 8px; text-align: center; font-size: 11px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+    color: #94A3B8; cursor: pointer; border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+  .tab.active { color: #00D4AA; border-bottom-color: #00D4AA; }
+  .tab:hover { color: #E2E8F0; }
+
+  .tab-content { display: none; flex: 1; overflow-y: auto; }
+  .tab-content.active { display: flex; flex-direction: column; }
+
+  /* ── Activity Feed ── */
+  .feed { flex: 1; overflow-y: auto; padding: 12px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .feed-entry { padding: 4px 0; line-height: 1.5; border-bottom: 1px solid #1E293B0A; }
+  .feed-entry .time { color: #475569; margin-right: 6px; }
+  .feed-entry .cycle-badge {
+    background: #1E293B; color: #94A3B8; padding: 1px 6px;
+    border-radius: 3px; font-size: 10px; margin-right: 6px;
+  }
+
+  /* ── Scoreboard ── */
+  .scoreboard { padding: 12px; }
+  .score-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; margin-bottom: 8px;
+    background: #1A2540; border-radius: 8px;
+    border-left: 3px solid #475569;
+  }
+  .score-item.high { border-left-color: #EF4444; }
+  .score-item.medium { border-left-color: #F59E0B; }
+  .score-item.low { border-left-color: #10B981; }
+  .score-rank { font-size: 18px; font-weight: 700; color: #475569; min-width: 24px; }
+  .score-info { flex: 1; }
+  .score-name { font-weight: 600; font-size: 14px; }
+  .score-rationale { font-size: 11px; color: #94A3B8; margin-top: 2px; }
+  .score-bar-bg { width: 100%; height: 6px; background: #1E293B; border-radius: 3px; margin-top: 4px; }
+  .score-bar { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+  .score-value { font-size: 20px; font-weight: 700; min-width: 40px; text-align: right; }
+  .score-delta { font-size: 11px; text-align: right; }
+  .score-delta.up { color: #EF4444; }
+  .score-delta.down { color: #10B981; }
+  .score-delta.same { color: #475569; }
+
+  /* ── Actions ── */
+  .actions-list { padding: 12px; }
+  .action-item {
+    padding: 10px 12px; margin-bottom: 8px;
+    background: #1A2540; border-radius: 8px;
+    border-left: 3px solid #475569;
+  }
+  .action-item.high { border-left-color: #EF4444; }
+  .action-item.medium { border-left-color: #F59E0B; }
+  .action-item.low { border-left-color: #10B981; }
+  .action-urgency {
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px; padding: 2px 6px; border-radius: 3px;
+    display: inline-block; margin-bottom: 4px;
+  }
+  .action-urgency.high { background: #EF44441A; color: #EF4444; }
+  .action-urgency.medium { background: #F59E0B1A; color: #F59E0B; }
+  .action-urgency.low { background: #10B9811A; color: #10B981; }
+  .action-text { font-size: 13px; line-height: 1.4; }
+  .action-type { font-size: 10px; color: #94A3B8; margin-top: 4px; }
+  .action-entities { font-size: 11px; color: #64748B; margin-top: 2px; }
+
+  /* ── Insights ── */
+  .insights-list { padding: 12px; }
+  .insight-card {
+    padding: 12px; margin-bottom: 8px;
+    background: #1A2540; border-radius: 8px;
+    border-left: 3px solid #8B5CF6;
+  }
+  .insight-header { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .insight-confidence { font-size: 12px; font-weight: 600; color: #00D4AA; }
+  .insight-cycle { font-size: 11px; color: #94A3B8; }
+  .insight-text { font-size: 13px; line-height: 1.5; }
+  .insight-bar-bg { width: 100%; height: 4px; background: #1E293B; border-radius: 2px; margin-top: 8px; }
+  .insight-bar { height: 100%; border-radius: 2px; }
+
+  /* ── Node Detail Panel ── */
+  .node-detail {
+    display: none; position: absolute; top: 16px; right: 16px;
+    width: 320px; max-height: calc(100% - 32px); overflow-y: auto;
+    background: #1A2540; border: 1px solid #2D3B55; border-radius: 12px;
+    padding: 16px; z-index: 10; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .node-detail.open { display: block; }
+  .node-detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .node-detail-header h3 { font-size: 16px; font-weight: 700; }
+  .node-detail-close { cursor: pointer; color: #94A3B8; font-size: 18px; padding: 4px; }
+  .node-detail-close:hover { color: #E2E8F0; }
+  .node-detail-type { font-size: 12px; color: #94A3B8; margin-bottom: 12px; }
+  .node-detail h4 { font-size: 12px; text-transform: uppercase; color: #64748B; margin: 12px 0 6px; letter-spacing: 0.5px; }
+  .node-rel { font-size: 12px; padding: 3px 0; color: #CBD5E1; }
+  .node-insight { font-size: 12px; padding: 6px 0; color: #CBD5E1; border-top: 1px solid #1E293B; }
+
+  /* ── Bottom Bar ── */
+  .bottom-bar {
+    grid-column: 1 / -1; border-top: 1px solid #1E293B;
+    padding: 12px 24px; background: #0F172A;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .ask-row { display: flex; gap: 8px; }
+  .ask-row input {
+    flex: 1; background: #1A2540; border: 1px solid #2D3B55;
+    color: #E2E8F0; padding: 10px 14px; border-radius: 8px;
+    font-family: inherit; font-size: 14px; outline: none;
+  }
+  .ask-row input:focus { border-color: #00D4AA; }
+  .ask-row input::placeholder { color: #475569; }
+  .ask-answer {
+    font-size: 13px; line-height: 1.5; color: #CBD5E1; padding: 8px 0;
+    display: none;
+  }
+  .ask-answer.visible { display: block; }
+  .ask-entities { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .ask-entity-tag {
+    font-size: 11px; background: #00D4AA1A; color: #00D4AA;
+    padding: 2px 8px; border-radius: 4px; cursor: pointer;
+  }
+  .controls-row { display: flex; gap: 8px; align-items: center; }
+  .controls-row input {
+    flex: 1; background: #1A2540; border: 1px solid #2D3B55;
+    color: #E2E8F0; padding: 8px 12px; border-radius: 6px;
+    font-family: inherit; font-size: 13px; outline: none;
+  }
+  .controls-row input:focus { border-color: #00D4AA; }
+  .controls-row input::placeholder { color: #475569; }
+  .btn {
+    padding: 8px 16px; border: none; border-radius: 6px;
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .btn-primary { background: #00D4AA; color: #0B1120; }
+  .btn-primary:hover { background: #00E8BB; }
+  .btn-secondary { background: #1A2540; color: #E2E8F0; border: 1px solid #2D3B55; }
+  .btn-secondary:hover { background: #2D3B55; }
+  .btn-danger { background: #1A2540; color: #EF4444; border: 1px solid #2D3B55; }
+  .btn-danger:hover { background: #EF44441A; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .empty-state { padding: 24px; text-align: center; color: #475569; font-size: 13px; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2D3B55; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1><span>ORBIT</span> ◈</h1>
+  <span class="subtitle">Self-Evolving Competitive Intelligence</span>
+  <span class="status-label" id="status-label">IDLE</span>
+  <div class="status-dot" id="status-dot"></div>
+</div>
+
+<!-- Stats Bar -->
+<div class="stats-bar">
+  <div class="stat"><div class="value" id="stat-companies">0</div><div class="label">Companies</div></div>
+  <div class="stat"><div class="value" id="stat-people">0</div><div class="label">People</div></div>
+  <div class="stat"><div class="value" id="stat-funding">0</div><div class="label">Funding</div></div>
+  <div class="stat"><div class="value" id="stat-products">0</div><div class="label">Products</div></div>
+  <div class="stat"><div class="value" id="stat-insights">0</div><div class="label">Insights</div></div>
+  <div class="stat"><div class="value" id="stat-rels">0</div><div class="label">Relationships</div></div>
+</div>
+
+<!-- Main Grid -->
+<div class="main-grid">
+
+  <!-- Graph -->
+  <div class="graph-panel" id="graph-panel">
+    <div id="graph-container"></div>
+    <div class="node-detail" id="node-detail">
+      <div class="node-detail-header">
+        <h3 id="node-detail-name"></h3>
+        <span class="node-detail-close" onclick="closeNodeDetail()">✕</span>
+      </div>
+      <div class="node-detail-type" id="node-detail-type"></div>
+      <div id="node-detail-body"></div>
+    </div>
+  </div>
+
+  <!-- Right Sidebar -->
+  <div class="sidebar">
+    <div class="tab-bar">
+      <div class="tab active" data-tab="feed">Activity</div>
+      <div class="tab" data-tab="scoreboard">Threats</div>
+      <div class="tab" data-tab="actions">Actions</div>
+      <div class="tab" data-tab="insights">Insights</div>
+    </div>
+    <div class="tab-content active" id="tab-feed">
+      <div class="feed" id="feed"></div>
+    </div>
+    <div class="tab-content" id="tab-scoreboard">
+      <div class="scoreboard" id="scoreboard">
+        <div class="empty-state">No threat scores yet. Start the agent to begin analysis.</div>
+      </div>
+    </div>
+    <div class="tab-content" id="tab-actions">
+      <div class="actions-list" id="actions-list">
+        <div class="empty-state">No action items yet. The agent will generate recommendations.</div>
+      </div>
+    </div>
+    <div class="tab-content" id="tab-insights">
+      <div class="insights-list" id="insights-list">
+        <div class="empty-state">No insights yet. Start the agent to discover patterns.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Bar -->
+  <div class="bottom-bar">
+    <div class="ask-row">
+      <input type="text" id="ask-input" placeholder="Ask Orbit: &quot;Who competes with Intercom?&quot; &quot;Where is VC money flowing?&quot;">
+      <button class="btn btn-primary" id="ask-btn" onclick="askQuestion()">Ask</button>
+    </div>
+    <div class="ask-answer" id="ask-answer"></div>
+    <div class="controls-row">
+      <input type="text" id="seed-input" placeholder="Seed query: e.g. AI agents for customer support">
+      <button class="btn btn-primary" id="start-btn" onclick="startAgent()">▶ Start</button>
+      <button class="btn btn-secondary" id="cycle-btn" onclick="triggerCycle()">🔄 Cycle</button>
+      <button class="btn btn-danger" onclick="clearGraph()">🗑 Clear</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+const POLL_MS = 3000;
+
+const EMOJI = {
+  search: '🔍', extract: '🧬', insight: '💡', relationship: '🔗',
+  stored: '🆕', query: '🎯', reason: '🧠', error: '❌',
+  cycle_start: '🔄', cycle_complete: '✅', threat: '⚠️', action: '🎬',
+};
+
+const NODE_COLORS = {
+  Company: '#3B82F6', Person: '#10B981',
+  FundingEvent: '#F59E0B', Product: '#8B5CF6', Insight: '#EF4444',
+};
+
+// ── Graph Setup ──
+const graphNodes = new vis.DataSet();
+const graphEdges = new vis.DataSet();
+const container = document.getElementById('graph-container');
+const network = new vis.Network(container, { nodes: graphNodes, edges: graphEdges }, {
+  physics: { stabilization: false, barnesHut: { gravitationalConstant: -3000, springLength: 150 } },
+  nodes: { font: { color: '#E2E8F0', size: 12 }, borderWidth: 0, shadow: true },
+  edges: {
+    color: { color: '#2D3B55', highlight: '#00D4AA' },
+    font: { color: '#64748B', size: 9, strokeWidth: 0 },
+    arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+    smooth: { type: 'continuous' },
+  },
+  interaction: { hover: true, tooltipDelay: 100 },
+});
+
+network.on('click', async (e) => {
+  if (e.nodes.length === 0) { closeNodeDetail(); return; }
+  const nodeId = e.nodes[0];
+  const node = graphNodes.get(nodeId);
+  if (!node) return;
+  try {
+    const res = await fetch(`${API}/api/graph/node/${encodeURIComponent(node.label)}`);
+    const data = await res.json();
+    showNodeDetail(data);
+  } catch (err) { console.error(err); }
+});
+
+function showNodeDetail(data) {
+  if (!data.node) return;
+  const panel = document.getElementById('node-detail');
+  document.getElementById('node-detail-name').textContent = data.node.name || data.node.text || '';
+  document.getElementById('node-detail-type').textContent = `Type: ${data.node.type} · Cycle ${data.node.cycle || '?'}`;
+
+  let html = '';
+  if (data.relationships.length) {
+    html += '<h4>Relationships</h4>';
+    data.relationships.forEach(r => {
+      const arrow = r.direction === 'out' ? '→' : '←';
+      html += `<div class="node-rel">${arrow} ${r.type} <strong>${r.target}</strong> (${r.target_type})</div>`;
+    });
+  }
+  if (data.related_insights.length) {
+    html += '<h4>Related Insights</h4>';
+    data.related_insights.forEach(i => {
+      html += `<div class="node-insight">💡 ${i.text}</div>`;
+    });
+  }
+  document.getElementById('node-detail-body').innerHTML = html;
+  panel.classList.add('open');
+}
+
+function closeNodeDetail() {
+  document.getElementById('node-detail').classList.remove('open');
+}
+
+// ── Tabs ──
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+  });
+});
+
+// ── Polling ──
+let lastLogCount = 0;
+let knownNodeIds = new Set();
+let knownEdgeIds = new Set();
+
+async function pollStatus() {
+  try {
+    const res = await fetch(`${API}/api/status`);
+    const data = await res.json();
+
+    // Update status indicator
+    const dot = document.getElementById('status-dot');
+    const label = document.getElementById('status-label');
+    dot.className = 'status-dot ' + (data.status || '');
+    label.textContent = (data.status || 'idle').toUpperCase();
+
+    const panel = document.getElementById('graph-panel');
+    if (data.status === 'running') panel.classList.add('active');
+    else panel.classList.remove('active');
+
+    // Update button states
+    const running = data.status === 'running';
+    document.getElementById('start-btn').disabled = running;
+    document.getElementById('cycle-btn').disabled = running;
+
+    // Append new log entries
+    if (data.logs && data.logs.length > lastLogCount) {
+      const feed = document.getElementById('feed');
+      for (let i = lastLogCount; i < data.logs.length; i++) {
+        const log = data.logs[i];
+        const emoji = EMOJI[log.type] || '•';
+        const time = log.timestamp ? log.timestamp.substring(11, 19) : '';
+        const div = document.createElement('div');
+        div.className = 'feed-entry';
+        div.innerHTML = `<span class="time">${time}</span><span class="cycle-badge">C${log.cycle}</span>${emoji} ${escapeHtml(log.message)}`;
+        feed.appendChild(div);
+      }
+      feed.scrollTop = feed.scrollHeight;
+      lastLogCount = data.logs.length;
+    }
+  } catch (err) { /* ignore */ }
+}
+
+async function pollGraph() {
+  try {
+    const res = await fetch(`${API}/api/graph`);
+    const data = await res.json();
+
+    const newNodeIds = new Set();
+    (data.nodes || []).forEach(n => {
+      newNodeIds.add(n.id);
+      if (!knownNodeIds.has(n.id)) {
+        const color = NODE_COLORS[n.type] || '#64748B';
+        graphNodes.add({
+          id: n.id, label: n.name || n.type,
+          color: { background: color, border: color, highlight: { background: color, border: '#00D4AA' } },
+          shape: n.type === 'Insight' ? 'diamond' : 'dot',
+          size: n.type === 'Company' ? 20 : 14,
+          title: `${n.type}: ${n.name}`,
+        });
+        knownNodeIds.add(n.id);
+      }
+    });
+
+    const newEdgeIds = new Set();
+    (data.edges || []).forEach(e => {
+      const eid = `${e.source}-${e.relationship}-${e.target}`;
+      newEdgeIds.add(eid);
+      if (!knownEdgeIds.has(eid)) {
+        graphEdges.add({ from: e.source, to: e.target, label: e.relationship, id: eid });
+        knownEdgeIds.add(eid);
+      }
+    });
+  } catch (err) { /* ignore */ }
+}
+
+async function pollStats() {
+  try {
+    const res = await fetch(`${API}/api/stats`);
+    const s = await res.json();
+    document.getElementById('stat-companies').textContent = s.companies || 0;
+    document.getElementById('stat-people').textContent = s.people || 0;
+    document.getElementById('stat-funding').textContent = s.funding_events || 0;
+    document.getElementById('stat-products').textContent = s.products || 0;
+    document.getElementById('stat-insights').textContent = s.insights || 0;
+    document.getElementById('stat-rels').textContent = s.relationships || 0;
+  } catch (err) { /* ignore */ }
+}
+
+async function pollScoreboard() {
+  try {
+    const res = await fetch(`${API}/api/scoreboard`);
+    const items = await res.json();
+    const el = document.getElementById('scoreboard');
+    if (!items.length) { el.innerHTML = '<div class="empty-state">No threat scores yet.</div>'; return; }
+    el.innerHTML = items.map((s, i) => {
+      const level = s.score >= 80 ? 'high' : s.score >= 40 ? 'medium' : 'low';
+      const barColor = s.score >= 80 ? '#EF4444' : s.score >= 40 ? '#F59E0B' : '#10B981';
+      const deltaClass = s.delta > 0 ? 'up' : s.delta < 0 ? 'down' : 'same';
+      const deltaStr = s.delta > 0 ? `▲ +${s.delta}` : s.delta < 0 ? `▼ ${s.delta}` : '—';
+      return `<div class="score-item ${level}">
+        <div class="score-rank">#${i + 1}</div>
+        <div class="score-info">
+          <div class="score-name">${escapeHtml(s.company)}</div>
+          <div class="score-rationale">${escapeHtml(s.rationale || '')}</div>
+          <div class="score-bar-bg"><div class="score-bar" style="width:${s.score}%;background:${barColor}"></div></div>
+        </div>
+        <div>
+          <div class="score-value" style="color:${barColor}">${s.score}</div>
+          <div class="score-delta ${deltaClass}">${deltaStr}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (err) { /* ignore */ }
+}
+
+async function pollActions() {
+  try {
+    const res = await fetch(`${API}/api/actions`);
+    const items = await res.json();
+    const el = document.getElementById('actions-list');
+    if (!items.length) { el.innerHTML = '<div class="empty-state">No action items yet.</div>'; return; }
+    el.innerHTML = items.map(a => {
+      const u = a.urgency || 'low';
+      const entities = (a.related_entities || []).join(', ');
+      return `<div class="action-item ${u}">
+        <span class="action-urgency ${u}">${u}</span>
+        <div class="action-text">${escapeHtml(a.action)}</div>
+        <div class="action-type">${escapeHtml(a.type || '')}</div>
+        ${entities ? `<div class="action-entities">→ ${escapeHtml(entities)}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch (err) { /* ignore */ }
+}
+
+async function pollInsights() {
+  try {
+    const res = await fetch(`${API}/api/insights`);
+    const items = await res.json();
+    const el = document.getElementById('insights-list');
+    if (!items.length) { el.innerHTML = '<div class="empty-state">No insights yet.</div>'; return; }
+    el.innerHTML = items.map(i => {
+      const conf = (i.confidence * 100).toFixed(0);
+      const barColor = i.confidence > 0.8 ? '#10B981' : i.confidence > 0.5 ? '#F59E0B' : '#EF4444';
+      return `<div class="insight-card">
+        <div class="insight-header">
+          <span class="insight-confidence">${conf}% confidence</span>
+          <span class="insight-cycle">Cycle ${i.cycle}</span>
+        </div>
+        <div class="insight-text">${escapeHtml(i.text)}</div>
+        <div class="insight-bar-bg"><div class="insight-bar" style="width:${conf}%;background:${barColor}"></div></div>
+      </div>`;
+    }).join('');
+  } catch (err) { /* ignore */ }
+}
+
+// ── Actions ──
+async function startAgent() {
+  const query = document.getElementById('seed-input').value.trim();
+  if (!query) return;
+  lastLogCount = 0;
+  document.getElementById('feed').innerHTML = '';
+  knownNodeIds.clear(); knownEdgeIds.clear();
+  graphNodes.clear(); graphEdges.clear();
+  await fetch(`${API}/api/seed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  });
+}
+
+async function triggerCycle() {
+  await fetch(`${API}/api/trigger-cycle`, { method: 'POST' });
+}
+
+async function clearGraph() {
+  await fetch(`${API}/api/clear`, { method: 'POST' });
+  lastLogCount = 0;
+  document.getElementById('feed').innerHTML = '';
+  knownNodeIds.clear(); knownEdgeIds.clear();
+  graphNodes.clear(); graphEdges.clear();
+  document.getElementById('ask-answer').classList.remove('visible');
+  document.getElementById('ask-answer').innerHTML = '';
+}
+
+async function askQuestion() {
+  const q = document.getElementById('ask-input').value.trim();
+  if (!q) return;
+  const btn = document.getElementById('ask-btn');
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const res = await fetch(`${API}/api/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q }),
+    });
+    const data = await res.json();
+    const answerEl = document.getElementById('ask-answer');
+    let html = `<div>${escapeHtml(data.answer)}</div>`;
+    if (data.entities_referenced && data.entities_referenced.length) {
+      html += '<div class="ask-entities">' +
+        data.entities_referenced.map(e => `<span class="ask-entity-tag">${escapeHtml(e)}</span>`).join('') +
+        '</div>';
+    }
+    answerEl.innerHTML = html;
+    answerEl.classList.add('visible');
+  } catch (err) { console.error(err); }
+  btn.disabled = false; btn.textContent = 'Ask';
+}
+
+// Enter key bindings
+document.getElementById('ask-input').addEventListener('keydown', e => { if (e.key === 'Enter') askQuestion(); });
+document.getElementById('seed-input').addEventListener('keydown', e => { if (e.key === 'Enter') startAgent(); });
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Start polling ──
+setInterval(pollStatus, POLL_MS);
+setInterval(pollGraph, POLL_MS);
+setInterval(pollStats, POLL_MS);
+setInterval(pollScoreboard, POLL_MS);
+setInterval(pollActions, POLL_MS);
+setInterval(pollInsights, POLL_MS);
+pollStatus(); pollGraph(); pollStats();
+</script>
+</body>
+</html>
