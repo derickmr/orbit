@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+httpx
+openai
+neo4j
+tavily-python
+python-dotenv
