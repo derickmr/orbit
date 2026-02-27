@@ -11,9 +11,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from openai import OpenAI
 
-from backend.config import OPENAI_API_KEY, OPENAI_MODEL
+import httpx
+
+from backend.config import OPENAI_API_KEY, OPENAI_MODEL, YUTORI_API_KEY
 from backend import graph
-from backend.agent import run_agent, run_single_cycle, agent_logs, agent_status
+from backend.agent import run_agent, run_single_cycle, process_breaking_intel, agent_logs, agent_status
 
 
 @asynccontextmanager
@@ -44,6 +46,10 @@ class SeedRequest(BaseModel):
 
 class AskRequest(BaseModel):
     question: str
+
+
+class IntelRequest(BaseModel):
+    text: str
 
 
 # ── Endpoints ──
@@ -174,6 +180,86 @@ async def ask_question(req: AskRequest):
     entities_referenced = [n for n in node_names if n.lower() in answer.lower()]
 
     return {"answer": answer, "entities_referenced": entities_referenced}
+
+
+@app.post("/api/inject-intel")
+async def inject_intel(req: IntelRequest, bg: BackgroundTasks):
+    """Inject breaking intel (simulates Yutori webhook or manual news input)."""
+    if agent_status["status"] == "running":
+        return {"error": "Agent is already running"}
+    company_name = agent_status.get("company_name", "")
+    company_description = agent_status.get("company_description", "")
+    if not company_name:
+        return {"error": "No company set. Run /api/seed first."}
+    bg.add_task(process_breaking_intel, req.text, company_name, company_description)
+    return {"status": "processing", "intel": req.text[:200]}
+
+
+@app.post("/api/deploy-monitors")
+async def deploy_monitors():
+    """Create Yutori Scouts for the top threats in the graph."""
+    if not YUTORI_API_KEY:
+        return {"error": "YUTORI_API_KEY not configured"}
+
+    scoreboard = await graph.get_scoreboard()
+    if not scoreboard:
+        return {"error": "No threats found. Run the agent first."}
+
+    company_name = agent_status.get("company_name", "your company")
+    top_threats = scoreboard[:5]
+
+    created_scouts = []
+    async with httpx.AsyncClient(timeout=30) as client:
+        for threat in top_threats:
+            name = threat["company"]
+            score = threat["score"]
+            query = (
+                f"Alert me when {name} announces new AI features, product launches, "
+                f"funding rounds, acquisitions, executive hires, or major partnerships. "
+                f"Context: monitoring {name} as a competitive threat to {company_name} "
+                f"(threat score: {score}/100)."
+            )
+            try:
+                resp = await client.post(
+                    "https://api.yutori.com/v1/scouting/tasks",
+                    headers={"X-API-Key": YUTORI_API_KEY},
+                    json={
+                        "query": query,
+                        "output_interval": 86400,
+                        "skip_email": False,
+                    },
+                )
+                data = resp.json()
+                if resp.status_code in (200, 201):
+                    created_scouts.append({
+                        "company": name,
+                        "threat_score": score,
+                        "scout_id": data.get("id"),
+                        "view_url": data.get("view_url"),
+                        "next_run": data.get("next_run_timestamp"),
+                        "status": "deployed",
+                    })
+                else:
+                    created_scouts.append({
+                        "company": name,
+                        "threat_score": score,
+                        "status": "failed",
+                        "error": data.get("detail", str(data)),
+                    })
+            except Exception as e:
+                created_scouts.append({
+                    "company": name,
+                    "threat_score": score,
+                    "status": "failed",
+                    "error": str(e),
+                })
+
+    deployed = [s for s in created_scouts if s["status"] == "deployed"]
+    return {
+        "deployed": len(deployed),
+        "total": len(top_threats),
+        "scouts": created_scouts,
+    }
 
 
 @app.post("/api/clear")

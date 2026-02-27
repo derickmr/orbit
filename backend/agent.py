@@ -6,7 +6,9 @@ import os
 from collections import Counter
 from datetime import datetime
 
-from backend.config import MAX_CYCLES, DEBUG
+import httpx
+
+from backend.config import MAX_CYCLES, DEBUG, YUTORI_API_KEY
 from backend.discovery import tavily_search
 from backend.extraction import extract_entities, extract_signals, extract_relationships
 from backend.reasoning import generate_reasoning, generate_deep_analysis
@@ -44,10 +46,10 @@ async def run_agent(company_name: str, company_description: str, max_cycles: int
     global agent_status
     company_context = f"{company_name}: {company_description}"
     seed_query = f"{company_name} competitors {company_description}"
-    agent_status = {
+    agent_status.update({
         "status": "running", "cycle": 0, "seed_query": seed_query,
         "company_name": company_name, "company_description": company_description,
-    }
+    })
 
     short_desc = company_description.split(",")[0].strip()  # e.g. "AI-powered customer support platform"
     pending_queries = [
@@ -82,6 +84,9 @@ async def run_agent(company_name: str, company_description: str, max_cycles: int
         # Deep analysis pass — cross-source connections + gap analysis
         await _run_deep_analysis(company_context, cycle)
 
+        # Auto-deploy monitors for top 2 threats
+        await _auto_deploy_monitors(company_name, cycle)
+
         agent_status["status"] = "complete"
         emit_log("cycle_complete", f"Agent finished after {cycle} cycles.", cycle)
     except Exception as e:
@@ -113,6 +118,78 @@ async def run_single_cycle(company_name: str, company_description: str):
         await _run_deep_analysis(company_context, cycle)
     except Exception as e:
         emit_log("error", f"Triggered cycle failed: {e}", cycle)
+
+    agent_status["status"] = "complete"
+
+
+async def process_breaking_intel(intel_text: str, company_name: str, company_description: str):
+    """Process injected intel (simulates a Yutori webhook or breaking news)."""
+    global agent_status
+    company_context = f"{company_name}: {company_description}"
+    cycle = agent_status.get("cycle", 0) + 1
+    agent_status["status"] = "running"
+    agent_status["cycle"] = cycle
+
+    emit_log("breaking", f"BREAKING INTEL RECEIVED: \"{intel_text[:100]}\"", cycle)
+
+    try:
+        # 1. Extract entities + signals from the intel
+        entities, signals = await asyncio.gather(
+            asyncio.to_thread(extract_entities, intel_text, company_context),
+            asyncio.to_thread(extract_signals, intel_text),
+        )
+        emit_log("extract", f"Extracted {len(entities)} entities, {len(signals)} signals from intel", cycle)
+
+        # 2. Store
+        await graph.store_entities(entities, "breaking_intel", cycle)
+        await graph.store_signals(signals, "breaking_intel", cycle)
+
+        # 3. Extract relationships with full graph context
+        existing_entities = await graph.get_all_entities()
+        extracted_rels = extract_relationships(intel_text, entities, existing_entities)
+        await graph.store_relationships(extracted_rels)
+        for rel in extracted_rels:
+            emit_log("relationship",
+                     f"LINK: {rel['from_name']} —{rel['relationship']}→ {rel['to_name']}", cycle)
+        emit_log("extract", f"Extracted {len(extracted_rels)} relationships from intel", cycle)
+
+        # 4. Reason about impact
+        emit_log("reason", "Analyzing impact of breaking intel...", cycle)
+        graph_context = await graph.get_graph_context(entities)
+        stats = await graph.get_graph_stats()
+        reasoning = generate_reasoning(
+            seed_query=company_context,
+            current_query=f"Breaking intel: {intel_text}",
+            search_results=[{"title": "Breaking Intel", "content": intel_text}],
+            entities=entities,
+            signals=signals,
+            graph_context=graph_context,
+            graph_stats=stats,
+            previous_queries=[],
+            cycle=cycle,
+        )
+
+        # 5. Store reasoning outputs
+        for insight in reasoning.get("insights", []):
+            await graph.store_insight(insight, cycle)
+            emit_log("insight", f"INSIGHT: \"{insight['text'][:100]}\"", cycle)
+
+        for rel in reasoning.get("relationships", []):
+            await graph.store_relationships([rel])
+
+        for score in reasoning.get("threat_scores", []):
+            await graph.update_threat_scores([score], cycle)
+            emit_log("threat", f"THREAT UPDATE: {score['company']} → {score['score']}/100", cycle)
+
+        for action in reasoning.get("action_items", []):
+            await graph.store_action_items([action], cycle)
+            emit_log("action",
+                     f"ACTION [{action.get('urgency', 'low').upper()}]: \"{action['action'][:80]}\"",
+                     cycle)
+
+        emit_log("breaking", "Breaking intel processed. Graph updated.", cycle)
+    except Exception as e:
+        emit_log("error", f"Failed to process intel: {e}", cycle)
 
     agent_status["status"] = "complete"
 
@@ -182,6 +259,49 @@ async def _run_deep_analysis(company_context: str, cycle: int):
         emit_log("prediction",
                  f"PREDICT ({conf:.0%}): \"{pred.get('prediction', '')[:80]}\" [{pred.get('timeframe', '')}]",
                  cycle, {"prediction": pred})
+
+
+async def _auto_deploy_monitors(company_name: str, cycle: int):
+    """Auto-deploy Yutori Scouts for the top 2 threats."""
+    if not YUTORI_API_KEY:
+        emit_log("monitor", "Skipping auto-deploy: YUTORI_API_KEY not set", cycle)
+        return
+
+    scoreboard = await graph.get_scoreboard()
+    if not scoreboard:
+        return
+
+    top_threats = scoreboard[:2]
+    emit_log("monitor", f"Deploying monitors for top {len(top_threats)} threats...", cycle)
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        for threat in top_threats:
+            name = threat["company"]
+            score = threat["score"]
+            query = (
+                f"Alert me when {name} announces new AI features, product launches, "
+                f"funding rounds, acquisitions, executive hires, or major partnerships. "
+                f"Context: monitoring {name} as a competitive threat to {company_name} "
+                f"(threat score: {score}/100)."
+            )
+            try:
+                resp = await client.post(
+                    "https://api.yutori.com/v1/scouting/tasks",
+                    headers={"X-API-Key": YUTORI_API_KEY},
+                    json={"query": query, "output_interval": 86400, "skip_email": False},
+                )
+                data = resp.json()
+                if resp.status_code in (200, 201):
+                    view_url = data.get("view_url", "")
+                    emit_log("monitor",
+                             f"DEPLOYED: Monitor for {name} (threat {score}) → {view_url}",
+                             cycle, {"scout": data})
+                else:
+                    emit_log("error",
+                             f"Failed to deploy monitor for {name}: {data}",
+                             cycle)
+            except Exception as e:
+                emit_log("error", f"Failed to deploy monitor for {name}: {e}", cycle)
 
 
 async def _run_cycle(

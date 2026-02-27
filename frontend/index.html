@@ -71,12 +71,13 @@
   /* ── Tabs ── */
   .tab-bar {
     display: flex; border-bottom: 1px solid #1E293B; flex-shrink: 0;
+    overflow-x: auto;
   }
   .tab {
-    flex: 1; padding: 10px 8px; text-align: center; font-size: 11px;
-    font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+    flex: 1 0 auto; padding: 10px 8px; text-align: center; font-size: 10px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
     color: #94A3B8; cursor: pointer; border-bottom: 2px solid transparent;
-    transition: all 0.2s;
+    transition: all 0.2s; white-space: nowrap;
   }
   .tab.active { color: #00D4AA; border-bottom-color: #00D4AA; }
   .tab:hover { color: #E2E8F0; }
@@ -295,6 +296,30 @@
     to { transform: translateY(0) scale(1); opacity: 1; }
   }
 
+  /* ── Monitors ── */
+  .monitors-list { padding: 12px; }
+  .monitor-card {
+    padding: 12px; margin-bottom: 8px;
+    background: #1A2540; border-radius: 8px;
+    border-left: 3px solid #8B5CF6;
+  }
+  .monitor-card.deployed { border-left-color: #00D4AA; }
+  .monitor-card.failed { border-left-color: #EF4444; }
+  .monitor-status {
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px; padding: 2px 6px; border-radius: 3px;
+    display: inline-block; margin-bottom: 4px;
+  }
+  .monitor-status.deployed { background: #00D4AA1A; color: #00D4AA; }
+  .monitor-status.failed { background: #EF44441A; color: #EF4444; }
+  .monitor-company { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+  .monitor-threat { font-size: 11px; color: #F59E0B; }
+  .monitor-link { font-size: 11px; color: #8B5CF6; margin-top: 4px; }
+  .monitor-link a { color: #8B5CF6; text-decoration: underline; }
+  .btn-monitor { background: #8B5CF6; color: #fff; }
+  .btn-monitor:hover { background: #A78BFA; }
+  .btn-monitor:disabled { opacity: 0.5; cursor: not-allowed; }
+
   /* scrollbar */
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -348,6 +373,7 @@
       <div class="tab" data-tab="gaps">Gaps</div>
       <div class="tab" data-tab="signals">Signals</div>
       <div class="tab" data-tab="insights">Insights</div>
+      <div class="tab" data-tab="monitors">Monitors</div>
     </div>
     <div class="tab-content active" id="tab-feed">
       <div class="feed" id="feed"></div>
@@ -377,6 +403,15 @@
         <div class="empty-state">No insights yet. Start the agent to discover patterns.</div>
       </div>
     </div>
+    <div class="tab-content" id="tab-monitors">
+      <div class="monitors-list" id="monitors-list">
+        <div style="padding:12px; text-align:center;">
+          <p style="color:#94A3B8; font-size:13px; margin-bottom:12px;">Deploy always-on monitors for your top threats via Yutori Scouts.</p>
+          <button class="btn btn-monitor" id="deploy-btn" onclick="deployMonitors()">Deploy Monitors</button>
+        </div>
+        <div id="monitors-results"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Bottom Bar -->
@@ -386,6 +421,11 @@
       <button class="btn btn-primary" id="ask-btn" onclick="askQuestion()">Ask</button>
     </div>
     <div class="ask-answer" id="ask-answer"></div>
+    <div class="controls-row" style="margin-bottom:4px;">
+      <span style="color:#EF4444;font-size:11px;font-weight:700;letter-spacing:0.5px;white-space:nowrap;">BREAKING</span>
+      <input type="text" id="intel-input" placeholder="Inject intel: e.g. &quot;Zendesk just acquired Drift for $500M&quot;" style="flex:2;">
+      <button class="btn" style="background:#EF4444;color:#fff;" id="intel-btn" onclick="injectIntel()">Inject</button>
+    </div>
     <div class="controls-row">
       <input type="text" id="company-name" placeholder="Your company name: e.g. Intercom" style="max-width:200px">
       <input type="text" id="company-desc" placeholder="What you do: e.g. AI-powered customer support platform">
@@ -405,7 +445,7 @@ const EMOJI = {
   stored: '🆕', query: '🎯', reason: '🧠', error: '❌',
   cycle_start: '🔄', cycle_complete: '✅', threat: '⚠️', action: '🎬',
   deep_insight: '🔮', market_gap: '🎯', signal: '📡',
-  money_trail: '💰', prediction: '🔮',
+  money_trail: '💰', prediction: '🔮', monitor: '📡', breaking: '🚨',
 };
 
 const NODE_COLORS = {
@@ -857,8 +897,57 @@ async function askQuestion() {
   btn.disabled = false; btn.textContent = 'Ask';
 }
 
+async function injectIntel() {
+  const input = document.getElementById('intel-input');
+  const text = input.value.trim();
+  if (!text) return;
+  const btn = document.getElementById('intel-btn');
+  btn.disabled = true; btn.textContent = 'Processing...';
+  try {
+    await fetch(`${API}/api/inject-intel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    input.value = '';
+  } catch (err) { console.error(err); }
+  btn.disabled = false; btn.textContent = 'Inject';
+}
+
+async function deployMonitors() {
+  const btn = document.getElementById('deploy-btn');
+  btn.disabled = true; btn.textContent = 'Deploying...';
+  try {
+    const res = await fetch(`${API}/api/deploy-monitors`, { method: 'POST' });
+    const data = await res.json();
+    if (data.error) {
+      document.getElementById('monitors-results').innerHTML =
+        `<div class="empty-state" style="color:#EF4444">${escapeHtml(data.error)}</div>`;
+      btn.disabled = false; btn.textContent = 'Deploy Monitors';
+      return;
+    }
+    const html = data.scouts.map(s => {
+      const statusCls = s.status === 'deployed' ? 'deployed' : 'failed';
+      return `<div class="monitor-card ${statusCls}">
+        <span class="monitor-status ${statusCls}">${s.status === 'deployed' ? 'LIVE' : 'FAILED'}</span>
+        <div class="monitor-company">${escapeHtml(s.company)}</div>
+        <div class="monitor-threat">Threat Score: ${s.threat_score}/100</div>
+        ${s.view_url ? `<div class="monitor-link"><a href="${escapeHtml(s.view_url)}" target="_blank">View Scout →</a></div>` : ''}
+        ${s.error ? `<div style="font-size:11px;color:#EF4444;margin-top:4px">${escapeHtml(s.error)}</div>` : ''}
+      </div>`;
+    }).join('');
+    document.getElementById('monitors-results').innerHTML = html;
+    btn.textContent = `${data.deployed}/${data.total} Deployed`;
+  } catch (err) {
+    document.getElementById('monitors-results').innerHTML =
+      `<div class="empty-state" style="color:#EF4444">Failed to deploy monitors</div>`;
+    btn.disabled = false; btn.textContent = 'Deploy Monitors';
+  }
+}
+
 // Enter key bindings
 document.getElementById('ask-input').addEventListener('keydown', e => { if (e.key === 'Enter') askQuestion(); });
+document.getElementById('intel-input').addEventListener('keydown', e => { if (e.key === 'Enter') injectIntel(); });
 document.getElementById('company-desc').addEventListener('keydown', e => { if (e.key === 'Enter') startAgent(); });
 
 function escapeHtml(s) {

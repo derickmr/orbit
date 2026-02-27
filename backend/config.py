@@ -12,4 +12,5 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 MAX_CYCLES = 3
 TAVILY_MAX_RESULTS = 8
 OPENAI_MODEL = "gpt-4o"
+YUTORI_API_KEY = os.getenv("YUTORI_API_KEY")
 DEBUG = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
