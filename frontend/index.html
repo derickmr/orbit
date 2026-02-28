@@ -600,6 +600,23 @@ async function pollStatus() {
       }
       feed.scrollTop = feed.scrollHeight;
       lastLogCount = data.logs.length;
+
+      // Auto-render deployed monitors in the Monitors tab
+      const monitorLogs = data.logs.filter(l => l.type === 'monitor' && l.message.startsWith('DEPLOYED:'));
+      if (monitorLogs.length > 0) {
+        const html = monitorLogs.map(l => {
+          const match = l.message.match(/Monitor for (.+?) \(threat (\d+)\) → (.+)/);
+          if (!match) return '';
+          const [, company, score, url] = match;
+          return `<div class="monitor-card deployed">
+            <span class="monitor-status deployed">LIVE</span>
+            <div class="monitor-company">${escapeHtml(company)}</div>
+            <div class="monitor-threat">Threat Score: ${score}/100</div>
+            <div class="monitor-link"><a href="${escapeHtml(url)}" target="_blank">View Scout →</a></div>
+          </div>`;
+        }).join('');
+        if (html) document.getElementById('monitors-results').innerHTML = html;
+      }
     }
   } catch (err) { /* ignore */ }
 }
@@ -633,9 +650,10 @@ async function pollGraph() {
     const newNodes = [];
     const fundingAlerts = [];
 
-    // Add only connected nodes (hide orphans)
+    // Show all nodes while running, hide orphans only when complete
+    const hideOrphans = lastStatus === 'complete';
     nodes.forEach(n => {
-      if (!connectedIds.has(n.id)) return;  // skip orphans
+      if (hideOrphans && !connectedIds.has(n.id)) return;  // skip orphans only when done
       if (knownNodeIds.has(n.id)) return;    // already added
 
       const isClient = clientName && (n.name || '').toLowerCase() === clientName;
@@ -709,6 +727,16 @@ async function pollGraph() {
       graphEdges.add({ from: e.source, to: e.target, label: e.relationship, id: eid });
       knownEdgeIds.add(eid);
     });
+
+    // When agent completes, remove orphan nodes that never got connected
+    if (hideOrphans) {
+      knownNodeIds.forEach(id => {
+        if (!connectedIds.has(id)) {
+          try { graphNodes.remove(id); } catch (e) {}
+          knownNodeIds.delete(id);
+        }
+      });
+    }
   } catch (err) { /* ignore */ }
 }
 
